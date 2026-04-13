@@ -8,16 +8,21 @@ import threading
 from datetime import datetime
 from typing import List, Dict, Optional, Any, Union
 from pathlib import Path
-import tiktoken
 import config
 from core.event_bus import publish, Events
+from core.identity import DEFAULT_PROMPT, history_db_path
+
+try:
+    import tiktoken
+except ImportError:  # pragma: no cover - exercised in low-dependency test envs
+    tiktoken = None
 
 logger = logging.getLogger(__name__)
 
 # System defaults for chat settings - hardcoded fallbacks
 # Primary source is user/settings/chat_defaults.json or factory chat_defaults.json
 SYSTEM_DEFAULTS = {
-    "prompt": "sapphire",
+    "prompt": DEFAULT_PROMPT,
     "toolset": "all",
     "voice": "af_heart",
     "pitch": 0.98,
@@ -39,9 +44,6 @@ SYSTEM_DEFAULTS = {
     "people_scope": "default",
     "email_scope": "default",
     "bitcoin_scope": "default",
-    "gcal_scope": "default",
-    "telegram_scope": "default",
-    "discord_scope": "default",
     "trim_color": "",
     "persona": None
 }
@@ -91,7 +93,17 @@ def get_tokenizer():
     """Lazy load tokenizer once."""
     global _tokenizer
     if _tokenizer is None:
-        _tokenizer = tiktoken.get_encoding("cl100k_base")
+        if tiktoken is None:
+            class _FallbackTokenizer:
+                @staticmethod
+                def encode(text):
+                    if not text:
+                        return []
+                    return str(text).split()
+
+            _tokenizer = _FallbackTokenizer()
+        else:
+            _tokenizer = tiktoken.get_encoding("cl100k_base")
     return _tokenizer
 
 def count_tokens(text: str) -> int:
@@ -601,7 +613,7 @@ class ChatSessionManager:
     """
     Manages chat sessions with SQLite storage for atomic writes.
     
-    Storage: user/history/sapphire_history.db (WAL mode)
+    Storage: user/history/sani_history.db (falls back to legacy sapphire_history.db)
     Schema: chats(name TEXT PRIMARY KEY, settings JSON, messages JSON, updated_at TEXT)
     
     Features:
@@ -615,7 +627,7 @@ class ChatSessionManager:
         self.history_dir = Path(history_dir)
         self.history_dir.mkdir(parents=True, exist_ok=True)
         
-        self._db_path = self.history_dir / "sapphire_history.db"
+        self._db_path = history_db_path(self.history_dir)
         self._lock = threading.RLock()
         
         self.current_chat = ConversationHistory(max_history=max_history)
@@ -624,8 +636,6 @@ class ChatSessionManager:
         
         # Track if we're in an active tool cycle (for Claude thinking_raw)
         self._in_tool_cycle = False
-        # Prevent chat switching during active streaming (would corrupt both chats)
-        self._is_streaming = False
         
         # Initialize database
         self._init_db()
@@ -858,14 +868,6 @@ class ChatSessionManager:
                 logger.debug(f"Saved chat '{self.active_chat_name}' ({len(self.current_chat.messages)} messages)")
             except Exception as e:
                 logger.error(f"Failed to save chat '{self.active_chat_name}': {e}")
-                try:
-                    from core.event_bus import publish, Events
-                    publish(Events.CONTINUITY_TASK_ERROR, {
-                        "task": "Chat Save",
-                        "error": f"Failed to save chat: {e}. Messages may be lost on restart."
-                    })
-                except Exception:
-                    pass
 
     def list_chat_files(self) -> List[Dict[str, Any]]:
         """List all available chats with metadata."""
@@ -875,16 +877,17 @@ class ChatSessionManager:
         try:
             with self._lock, self._get_connection() as conn:
                 cursor = conn.execute(
-                    """SELECT name, settings, json_array_length(messages) as msg_count, updated_at FROM chats
+                    """SELECT name, settings, messages, updated_at FROM chats 
                        ORDER BY updated_at DESC"""
                 )
                 for row in cursor:
+                    messages = json.loads(row["messages"])
                     settings = json.loads(row["settings"])
                     
                     chats.append({
                         "name": row["name"],
                         "display_name": settings.get("private_display_name") or settings.get("story_display_name") or row["name"].replace('_', ' ').title(),
-                        "message_count": row["msg_count"] or 0,
+                        "message_count": len(messages),
                         "is_active": row["name"] == self.active_chat_name,
                         "modified": row["updated_at"],
                         "story_chat": bool(settings.get("story_chat")),
@@ -941,10 +944,6 @@ class ChatSessionManager:
     def delete_chat(self, chat_name: str) -> bool:
         """Delete chat. Recreates default if deleted, switches active if needed."""
         self._ensure_db()
-
-        if self._is_streaming and chat_name == self.active_chat_name:
-            logger.warning(f"Cannot delete '{chat_name}' — streaming in progress")
-            return False
 
         try:
             with self._lock, self._get_connection() as conn:
@@ -1026,12 +1025,6 @@ class ChatSessionManager:
 
     def _save_last_active(self, chat_name):
         """Persist active chat name for restart recovery."""
-        try:
-            from core.privacy import is_privacy_mode
-            if is_privacy_mode():
-                return  # Don't leak chat name to disk during privacy mode
-        except ImportError:
-            pass
         marker = self.history_dir / ".active_chat"
         try:
             marker.write_text(chat_name, encoding='utf-8')
@@ -1043,10 +1036,6 @@ class ChatSessionManager:
         with self._lock:
             if chat_name == self.active_chat_name:
                 return True
-
-            if self._is_streaming:
-                logger.warning(f"Cannot switch to '{chat_name}' — streaming in progress on '{self.active_chat_name}'")
-                return False
 
             self._save_current_chat()
 
@@ -1068,9 +1057,8 @@ class ChatSessionManager:
     def add_user_message(self, content: Union[str, List[Dict[str, Any]]], persona: Optional[str] = None):
         if persona is None:
             persona = self.current_settings.get("persona")
-        with self._lock:
-            self.current_chat.add_user_message(content, persona=persona)
-            self._save_current_chat()
+        self.current_chat.add_user_message(content, persona=persona)
+        self._save_current_chat()
         publish(Events.MESSAGE_ADDED, {"role": "user"})
 
     def add_assistant_with_tool_calls(
@@ -1084,16 +1072,14 @@ class ChatSessionManager:
         """Add assistant message with tool calls. Marks start of tool cycle."""
         self._in_tool_cycle = True
         persona = self.current_settings.get("persona")
-        with self._lock:
-            self.current_chat.add_assistant_with_tool_calls(
-                content, tool_calls, thinking, thinking_raw, metadata, persona=persona
-            )
-            self._save_current_chat()
+        self.current_chat.add_assistant_with_tool_calls(
+            content, tool_calls, thinking, thinking_raw, metadata, persona=persona
+        )
+        self._save_current_chat()
 
     def add_tool_result(self, tool_call_id: str, name: str, content: str, inputs: Optional[Dict] = None):
-        with self._lock:
-            self.current_chat.add_tool_result(tool_call_id, name, content, inputs)
-            self._save_current_chat()
+        self.current_chat.add_tool_result(tool_call_id, name, content, inputs)
+        self._save_current_chat()
 
     def add_assistant_final(
         self,
@@ -1103,21 +1089,19 @@ class ChatSessionManager:
     ):
         """Add final assistant message. Ends tool cycle and clears thinking_raw."""
         persona = self.current_settings.get("persona")
-        with self._lock:
-            self.current_chat.add_assistant_final(content, thinking, metadata, persona=persona)
-
-            # Tool cycle complete - clear thinking_raw from previous messages
-            if self._in_tool_cycle:
-                self.current_chat.clear_thinking_raw()
-                self._in_tool_cycle = False
-
-            self._save_current_chat()
+        self.current_chat.add_assistant_final(content, thinking, metadata, persona=persona)
+        
+        # Tool cycle complete - clear thinking_raw from previous messages
+        if self._in_tool_cycle:
+            self.current_chat.clear_thinking_raw()
+            self._in_tool_cycle = False
+            
+        self._save_current_chat()
         publish(Events.MESSAGE_ADDED, {"role": "assistant"})
 
     def add_message_pair(self, user_content: str, assistant_content: str):
-        with self._lock:
-            self.current_chat.add_message_pair(user_content, assistant_content)
-            self._save_current_chat()
+        self.current_chat.add_message_pair(user_content, assistant_content)
+        self._save_current_chat()
         publish(Events.MESSAGE_ADDED, {"role": "pair"})
 
     def get_messages(self) -> List[Dict[str, str]]:
@@ -1169,27 +1153,16 @@ class ChatSessionManager:
                     "SELECT messages FROM chats WHERE name = ?", (chat_name,)
                 )
                 row = cursor.fetchone()
-                if not row:
-                    logger.warning(f"Chat '{chat_name}' not found — skipping append (may have been deleted)")
-                    return
-                messages = json.loads(row["messages"])
+                messages = json.loads(row["messages"]) if row else []
                 messages.append({"role": "user", "content": user_content, "timestamp": timestamp})
                 messages.append({"role": "assistant", "content": assistant_content, "timestamp": timestamp})
                 conn.execute(
-                    """UPDATE chats SET messages = ?, updated_at = ? WHERE name = ?""",
-                    (json.dumps(messages), timestamp, chat_name)
+                    """INSERT OR REPLACE INTO chats (name, settings, messages, updated_at)
+                       VALUES (?, COALESCE((SELECT settings FROM chats WHERE name = ?), '{}'), ?, ?)""",
+                    (chat_name, chat_name, json.dumps(messages), timestamp)
                 )
                 conn.commit()
                 logger.debug(f"Appended message pair to chat '{chat_name}'")
-
-                # If this is the active chat, append to in-memory list instead of
-                # replacing it — replacing would wipe any unsaved user/assistant messages
-                # from the streaming pipeline that are in the in-memory list but not yet in DB
-                if chat_name == self.active_chat_name:
-                    self.current_chat.messages.append({"role": "user", "content": user_content, "timestamp": timestamp})
-                    self.current_chat.messages.append({"role": "assistant", "content": assistant_content, "timestamp": timestamp})
-
-                publish(Events.MESSAGE_ADDED, {"role": "pair", "chat_name": chat_name})
         except Exception as e:
             logger.error(f"Failed to append to chat '{chat_name}': {e}")
 

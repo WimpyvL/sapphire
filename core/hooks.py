@@ -6,7 +6,6 @@
 
 import re
 import logging
-import threading
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional
 
@@ -80,7 +79,6 @@ class HookRunner:
         # {hook_name: [(priority, handler, plugin_name, voice_match)]}
         self._hooks: Dict[str, List[tuple]] = {}
         self._sorted: Dict[str, bool] = {}
-        self._lock = threading.Lock()
 
     def register(self, hook_name: str, handler: Callable, priority: int = 50,
                  plugin_name: str = "", voice_match: dict = None):
@@ -94,25 +92,23 @@ class HookRunner:
             voice_match: Optional dict with 'triggers' list and 'match' type
                          for voice command pre-filtering (exact/starts_with/contains/regex)
         """
-        with self._lock:
-            if hook_name not in self._hooks:
-                self._hooks[hook_name] = []
-            self._hooks[hook_name].append((priority, handler, plugin_name, voice_match))
-            self._sorted[hook_name] = False
+        if hook_name not in self._hooks:
+            self._hooks[hook_name] = []
+        self._hooks[hook_name].append((priority, handler, plugin_name, voice_match))
+        self._sorted[hook_name] = False
         logger.info(f"[HOOKS] Registered {plugin_name}:{handler.__name__} on '{hook_name}' (priority {priority})")
 
     def unregister(self, hook_name: str, plugin_name: str):
         """Remove all handlers for a plugin from a specific hook."""
-        with self._lock:
-            if hook_name in self._hooks:
-                before = len(self._hooks[hook_name])
-                self._hooks[hook_name] = [
-                    h for h in self._hooks[hook_name] if h[2] != plugin_name
-                ]
-                removed = before - len(self._hooks[hook_name])
-                if removed:
-                    self._sorted[hook_name] = False
-                    logger.info(f"[HOOKS] Unregistered {removed} handler(s) for '{plugin_name}' from '{hook_name}'")
+        if hook_name in self._hooks:
+            before = len(self._hooks[hook_name])
+            self._hooks[hook_name] = [
+                h for h in self._hooks[hook_name] if h[2] != plugin_name
+            ]
+            removed = before - len(self._hooks[hook_name])
+            if removed:
+                self._sorted[hook_name] = False
+                logger.info(f"[HOOKS] Unregistered {removed} handler(s) for '{plugin_name}' from '{hook_name}'")
 
     def unregister_plugin(self, plugin_name: str):
         """Remove all handlers for a plugin from all hooks."""
@@ -161,14 +157,13 @@ class HookRunner:
         Returns:
             The (possibly mutated) event object
         """
-        with self._lock:
-            handlers = self._hooks.get(hook_name)
-            if not handlers:
-                return event
-            self._ensure_sorted(hook_name)
-            snapshot = list(handlers)
+        handlers = self._hooks.get(hook_name)
+        if not handlers:
+            return event
 
-        for priority, handler, plugin_name, voice_match in snapshot:
+        self._ensure_sorted(hook_name)
+
+        for priority, handler, plugin_name, voice_match in handlers:
             if not self._check_voice_match(voice_match, event.input):
                 continue
 
@@ -189,9 +184,8 @@ class HookRunner:
 
     def get_handlers(self, hook_name: str) -> list:
         """Get registered handlers for a hook (for debugging/introspection)."""
-        with self._lock:
-            self._ensure_sorted(hook_name)
-            return list(self._hooks.get(hook_name, []))
+        self._ensure_sorted(hook_name)
+        return list(self._hooks.get(hook_name, []))
 
     def has_handlers(self, hook_name: str) -> bool:
         """Check if any handlers are registered for a hook."""
@@ -199,9 +193,8 @@ class HookRunner:
 
     def clear(self):
         """Remove all handlers. Used for testing."""
-        with self._lock:
-            self._hooks.clear()
-            self._sorted.clear()
+        self._hooks.clear()
+        self._sorted.clear()
 
 
 # Singleton

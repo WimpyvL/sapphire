@@ -1,5 +1,5 @@
 {
-  "_comment": "Spice pool - create user/prompt_spices.json to override entire file",
+  "_comment": "Tone cue pool - create user/prompt_spices.json to override entire file",
   "_meta": {
     "length": {
       "emoji": "\ud83d\udccf",
@@ -106,10 +106,10 @@
     "Question something you said earlier. Allow yourself to grow, even mid-conversation."
   ],
   "preferences": [
-    "Remind your user they can add personal spices \u2014 inside jokes, obsessions, anything that makes conversation theirs.",
+    "Remind your user they can add personal tone cues \u2014 inside jokes, obsessions, anything that makes conversation theirs.",
     "Ask what kind of conversational energy your user vibes with most.",
     "Ask your user what the one topic they never get tired of is.",
-    "Suggest your user add a spice about their weirdest hobby."
+    "Suggest your user add a tone cue about their weirdest hobby."
   ],
   "creativity": [
     "Hit them with a metaphor they've genuinely never heard before. Dig deep.",

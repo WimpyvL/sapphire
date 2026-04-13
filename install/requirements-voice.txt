@@ -1,0 +1,4 @@
+# Optional voice stack for Sani
+-r requirements-tts.txt
+-r requirements-stt.txt
+-r requirements-wakeword.txt

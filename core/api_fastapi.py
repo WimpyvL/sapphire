@@ -21,6 +21,7 @@ from core.auth import (
 from core.setup import get_password_hash, save_password_hash, verify_password, is_setup_complete
 from core.event_bus import publish, Events
 from core import prompts
+from core.identity import PRODUCT_NAME, SESSION_COOKIE
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +64,7 @@ IMPORT_MAP = _build_import_map()
 # =============================================================================
 
 app = FastAPI(
-    title="Sapphire",
+    title=PRODUCT_NAME,
     docs_url=None,  # Disable swagger UI
     redoc_url=None,  # Disable redoc
     openapi_url=None  # Disable openapi.json
@@ -94,41 +95,17 @@ USER_PLUGINS_DIR_WEB = PROJECT_ROOT / "user" / "plugins"
 import mimetypes
 @app.get("/plugin-web/{plugin_name}/{path:path}")
 async def serve_plugin_web(plugin_name: str, path: str, _=Depends(require_login)):
-    """Serve web assets from plugin web/ and app/ directories.
-    /plugin-web/{name}/foo.js     → {plugin}/web/foo.js  (existing behavior)
-    /plugin-web/{name}/app/foo.js → {plugin}/app/foo.js  (app pages)
-    """
+    """Serve web assets from plugin web/ directories."""
     for base_dir in [SYSTEM_PLUGINS_DIR, USER_PLUGINS_DIR_WEB]:
-        plugin_dir = (base_dir / plugin_name).resolve()
-
-        # If path starts with app/, serve from app/ directory directly
-        if path.startswith("app/"):
-            file_path = (plugin_dir / path).resolve()
-            if str(file_path).startswith(str(plugin_dir)) and file_path.exists() and file_path.is_file():
-                content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
-                return FileResponse(file_path, media_type=content_type)
-            continue
-
-        # Otherwise serve from web/ subdirectory (existing behavior)
-        web_dir = (plugin_dir / "web").resolve()
+        web_dir = (base_dir / plugin_name / "web").resolve()
         file_path = (web_dir / path).resolve()
+        # Security: ensure path doesn't escape web/ dir
         if not str(file_path).startswith(str(web_dir)):
             continue
         if file_path.exists() and file_path.is_file():
             content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
             return FileResponse(file_path, media_type=content_type)
     return JSONResponse({"error": "Not found"}, status_code=404)
-
-# Avatar assets (user/avatar/)
-@app.get("/api/avatar/{filename}")
-async def serve_avatar_asset(filename: str, _=Depends(require_login)):
-    """Serve avatar files from user/avatar/."""
-    avatar_dir = (PROJECT_ROOT / "user" / "avatar").resolve()
-    file_path = (avatar_dir / filename).resolve()
-    if not str(file_path).startswith(str(avatar_dir)) or not file_path.exists():
-        return JSONResponse({"error": "Not found"}, status_code=404)
-    content_type = mimetypes.guess_type(str(file_path))[0] or "application/octet-stream"
-    return FileResponse(file_path, media_type=content_type)
 
 # Workspace file serving — Claude Code project outputs
 @app.get("/workspace/{project}/{path:path}")
@@ -250,37 +227,11 @@ async def security_headers(request: Request, call_next):
 
 
 # Session middleware - added AFTER HTTP middleware so it's outermost (Starlette LIFO)
-# Use a dedicated session secret file (not the password hash) so sessions survive
-# password changes and are stable from first boot through setup completion.
-def _get_session_secret():
-    from core.setup import CONFIG_DIR
-    secret_file = CONFIG_DIR / 'session_secret'
-    if secret_file.exists():
-        try:
-            val = secret_file.read_text().strip()
-            if val:  # Guard against empty/truncated file from crash
-                return val
-        except Exception:
-            pass
-    # Generate and persist a new secret (atomic write)
-    secret = secrets.token_hex(32)
-    try:
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        tmp_path = secret_file.with_suffix('.tmp')
-        tmp_path.write_text(secret)
-        import sys
-        if sys.platform != 'win32':
-            import os as _os
-            _os.chmod(tmp_path, 0o600)
-        tmp_path.replace(secret_file)
-    except Exception:
-        pass  # Falls back to ephemeral secret (session won't survive restart)
-    return secret
-
+_password_hash = get_password_hash()
 app.add_middleware(
     SessionMiddleware,
-    secret_key=_get_session_secret(),
-    session_cookie="sapphire_session",
+    secret_key=_password_hash if _password_hash else secrets.token_hex(32),
+    session_cookie=SESSION_COOKIE,
     max_age=30 * 24 * 60 * 60,  # 30 days
     same_site="lax",
     https_only=getattr(config, 'WEB_UI_SSL_ADHOC', False)
@@ -298,12 +249,8 @@ async def favicon():
 
 def _no_cache_html(template: str, context: dict):
     """TemplateResponse with aggressive no-cache headers (bypass middleware issues)."""
-    # Starlette 0.30+ requires request as first positional arg
-    request = context.get("request")
-    try:
-        resp = templates.TemplateResponse(request, template, context=context)
-    except TypeError:
-        resp = templates.TemplateResponse(name=template, context=context)
+    request = context["request"]
+    resp = templates.TemplateResponse(request=request, name=template, context=context)
     resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     resp.headers['Pragma'] = 'no-cache'
     resp.headers['Expires'] = '0'
@@ -348,13 +295,6 @@ async def setup_submit(request: Request):
         return RedirectResponse(url="/setup?error=rate", status_code=302)
 
     form = await request.form()
-
-    # CSRF check
-    csrf_token = form.get('csrf_token')
-    if not validate_csrf(request, csrf_token):
-        logger.warning(f"CSRF validation failed on setup from {client_ip}")
-        return RedirectResponse(url="/setup?error=csrf", status_code=302)
-
     password = form.get('password', '')
     confirm = form.get('confirm', '')
 
@@ -434,8 +374,7 @@ from core.tts.utils import validate_voice as _validate_tts_voice, default_voice 
 
 
 def _apply_chat_settings(system, settings: dict):
-    """Apply chat settings to the system (TTS, prompt, ability, state engine).
-    Each section is isolated so one failure doesn't skip the rest."""
+    """Apply chat settings to the system (TTS, prompt, ability, state engine)."""
     try:
         if "voice" in settings:
             voice = _validate_tts_voice(settings["voice"])
@@ -444,10 +383,7 @@ def _apply_chat_settings(system, settings: dict):
             system.tts.set_pitch(settings["pitch"])
         if "speed" in settings:
             system.tts.set_speed(settings["speed"])
-    except Exception as e:
-        logger.error(f"Error applying TTS settings: {e}")
 
-    try:
         if "prompt" in settings:
             prompt_name = settings["prompt"]
             prompt_data = prompts.get_prompt(prompt_name)
@@ -460,16 +396,10 @@ def _apply_chat_settings(system, settings: dict):
                     prompts.apply_scenario(prompt_name)
 
                 logger.info(f"Applied prompt: {prompt_name}")
-    except Exception as e:
-        logger.error(f"Error applying prompt settings: {e}")
 
-    try:
         from core.chat.function_manager import apply_scopes_from_settings
         apply_scopes_from_settings(system.llm_chat.function_manager, settings)
-    except Exception as e:
-        logger.error(f"Error applying scope settings: {e}")
 
-    try:
         if "spice_set" in settings:
             from core.spice_sets import spice_set_manager
             set_name = settings["spice_set"]
@@ -481,20 +411,14 @@ def _apply_chat_settings(system, settings: dict):
                 prompts.invalidate_spice_picks()
                 spice_set_manager.active_name = set_name
                 logger.info(f"Applied spice set: {set_name}")
-    except Exception as e:
-        logger.error(f"Error applying spice set: {e}")
 
-    try:
         toolset_key = "toolset" if "toolset" in settings else "ability" if "ability" in settings else None
         if toolset_key:
             toolset_name = settings[toolset_key]
             system.llm_chat.function_manager.update_enabled_functions([toolset_name])
             logger.info(f"Applied toolset: {toolset_name}")
             publish(Events.TOOLSET_CHANGED, {"name": toolset_name})
-    except Exception as e:
-        logger.error(f"Error applying toolset: {e}")
 
-    try:
         system.llm_chat._update_story_engine()
 
         if settings.get('story_engine_enabled') is not None:
@@ -504,8 +428,9 @@ def _apply_chat_settings(system, settings: dict):
                 "action": "story_engine_update",
                 "function_count": toolset_info.get("function_count", 0)
             })
+
     except Exception as e:
-        logger.error(f"Error applying story engine settings: {e}")
+        logger.error(f"Error applying chat settings: {e}", exc_info=True)
 
 
 # =============================================================================
@@ -535,4 +460,3 @@ app.include_router(plugins_router)
 app.include_router(media_router)
 app.include_router(agents_router)
 app.include_router(docs_router)
-

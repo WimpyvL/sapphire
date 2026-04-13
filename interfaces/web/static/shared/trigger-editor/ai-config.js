@@ -49,20 +49,10 @@ export function renderAIConfig(t, data, opts = {}) {
             personas, voices } = data;
     const { isHeartbeat } = opts;
 
-    const enabledProviders = providers.filter(p => p.enabled);
-    const coreProvs = enabledProviders.filter(p => p.is_core);
-    const customProvs = enabledProviders.filter(p => !p.is_core);
-    let providerOpts = coreProvs
-        .map(p => `<option value="${p.key}" ${t.provider === p.key ? 'selected' : ''}>${p.display_name}</option>`)
+    const providerOpts = providers
+        .filter(p => p.enabled)
+        .map(p => `<option value="${p.key}" ${t.provider === p.key ? 'selected' : ''}>${p.display_name}${p.is_local ? ' \uD83C\uDFE0' : ' \u2601\uFE0F'}</option>`)
         .join('');
-    if (customProvs.length && coreProvs.length) {
-        providerOpts += '<option disabled>\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</option>';
-    }
-    providerOpts += customProvs
-        .map(p => {
-            const model = p.model ? ` (${p.model.split('/').pop()})` : '';
-            return `<option value="${p.key}" ${t.provider === p.key ? 'selected' : ''}>${p.display_name}${model}</option>`;
-        }).join('');
 
     let voiceOpts = voices.map(v =>
         `<option value="${v.voice_id}" ${t.voice === v.voice_id ? 'selected' : ''}>${v.name}${v.category ? ' (' + v.category + ')' : ''}</option>`
@@ -198,21 +188,6 @@ export function renderAIConfig(t, data, opts = {}) {
                         <input type="number" id="ed-max-rounds" value="${t.max_tool_rounds || 0}" min="0" style="width:60px">
                     </div>
                 </div>
-                <div class="sched-field-row">
-                    <div class="sched-field">
-                        <label>Max runs <span class="help-tip" data-tip="Auto-disable after N runs. 1 = one-shot task. 0 = unlimited.">?</span></label>
-                        <div style="display:flex;align-items:center;gap:6px">
-                            <input type="number" id="ed-max-runs" value="${t.max_runs || 0}" min="0" style="width:60px">
-                            ${(t.max_runs || 0) > 0 ? `<span class="text-muted">${t.run_count || 0}/${t.max_runs} done</span>` : ''}
-                        </div>
-                    </div>
-                    <div class="sched-field">
-                        <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
-                            <input type="checkbox" id="ed-delete-after-run" ${t.delete_after_run ? 'checked' : ''}>
-                            Delete after run <span class="help-tip" data-tip="Automatically delete this task after it runs once. For one-shot tasks that should leave no trace.">?</span>
-                        </label>
-                    </div>
-                </div>
             </div></div>
         </details>`;
 }
@@ -274,13 +249,10 @@ export function wireAIConfig(modal, t, data) {
         const modelSel = modal.querySelector('#ed-model');
         modelField.style.display = 'none';
         modelCustomField.style.display = 'none';
-        modelSel.disabled = false;
         if (key === 'auto' || !key) return;
         const meta = metadata[key];
         const pConfig = providers.find(p => p.key === key);
-        const isCore = pConfig?.is_core;
-        if (isCore && meta?.model_options && Object.keys(meta.model_options).length > 0) {
-            // Core provider: show model dropdown with options
+        if (meta?.model_options && Object.keys(meta.model_options).length > 0) {
             const defaultModel = pConfig?.model || '';
             const defaultLabel = defaultModel ? `Provider default (${meta.model_options[defaultModel] || defaultModel})` : 'Provider default';
             modelSel.innerHTML = `<option value="">${defaultLabel}</option>` +
@@ -291,13 +263,7 @@ export function wireAIConfig(modal, t, data) {
                 modelSel.innerHTML += `<option value="${t.model}" selected>${t.model}</option>`;
             }
             modelField.style.display = '';
-        } else if (!isCore) {
-            // Custom provider: model is baked in, show as disabled
-            const model = pConfig?.model || '(default)';
-            modelSel.innerHTML = `<option value="${pConfig?.model || ''}">${model}</option>`;
-            modelSel.disabled = true;
-            modelField.style.display = '';
-        } else {
+        } else if (key === 'other' || key === 'lmstudio') {
             modelCustomField.style.display = '';
         }
     };
@@ -406,8 +372,6 @@ export function readAIConfig(modal) {
         context_limit: parseInt(modal.querySelector('#ed-context-limit')?.value) || 0,
         max_parallel_tools: parseInt(modal.querySelector('#ed-max-parallel')?.value) || 0,
         max_tool_rounds: parseInt(modal.querySelector('#ed-max-rounds')?.value) || 0,
-        max_runs: parseInt(modal.querySelector('#ed-max-runs')?.value) || 0,
-        delete_after_run: modal.querySelector('#ed-delete-after-run')?.checked || false,
     };
 }
 

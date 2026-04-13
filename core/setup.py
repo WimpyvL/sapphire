@@ -3,9 +3,9 @@
 Single source of truth for secrets and platform-appropriate config paths.
 
 Config locations by platform:
-- Windows: %APPDATA%/Sapphire/
-- macOS: ~/Library/Application Support/Sapphire/
-- Linux: ~/.config/sapphire/
+- Windows: %APPDATA%/Sani/ (falls back to legacy Sapphire dir if it exists)
+- macOS: ~/Library/Application Support/Sani/ (falls back to legacy Sapphire dir)
+- Linux: ~/.config/sani/ (falls back to legacy sapphire dir)
 
 Files stored:
 - secret_key: bcrypt hash for auth
@@ -18,6 +18,12 @@ import json
 import logging
 import shutil
 from pathlib import Path
+from core.identity import (
+    PRODUCT_NAME,
+    select_config_dir,
+    env_get,
+    history_db_path,
+)
 
 try:
     import bcrypt
@@ -34,21 +40,7 @@ def get_config_dir() -> Path:
     Returns:
         Path to config directory (created if needed on first access)
     """
-    if sys.platform == 'win32':
-        # Windows: %APPDATA%/Sapphire
-        base = os.environ.get('APPDATA')
-        if base:
-            return Path(base) / 'Sapphire'
-        return Path.home() / 'AppData' / 'Roaming' / 'Sapphire'
-    elif sys.platform == 'darwin':
-        # macOS: ~/Library/Application Support/Sapphire
-        return Path.home() / 'Library' / 'Application Support' / 'Sapphire'
-    else:
-        # Linux/Unix: XDG Base Directory spec
-        xdg_config = os.environ.get('XDG_CONFIG_HOME')
-        if xdg_config:
-            return Path(xdg_config) / 'sapphire'
-        return Path.home() / '.config' / 'sapphire'
+    return select_config_dir()
 
 
 CONFIG_DIR = get_config_dir()
@@ -102,8 +94,8 @@ def save_password_hash(password: str) -> str | None:
         logger.error("bcrypt module not available")
         return None
     
-    if not password or len(password) < 6:
-        logger.error("Password too short (minimum 6 characters)")
+    if not password or len(password) < 4:
+        logger.error("Password too short")
         return None
     
     try:
@@ -169,7 +161,7 @@ def get_socks_credentials() -> tuple[str | None, str | None]:
     """
     Load SOCKS5 credentials with priority:
     1. credentials.json (managed by credentials_manager)
-    2. Environment variables (SAPPHIRE_SOCKS_USERNAME, SAPPHIRE_SOCKS_PASSWORD)
+    2. Environment variables (SANI_SOCKS_USERNAME / SAPPHIRE_SOCKS_USERNAME)
     3. Legacy: CONFIG_DIR/socks_config
     4. Legacy: user/.socks_config
     
@@ -186,8 +178,8 @@ def get_socks_credentials() -> tuple[str | None, str | None]:
         pass  # credentials_manager not available yet
     
     # 2. Try env vars (production/deployment)
-    username = os.environ.get('SAPPHIRE_SOCKS_USERNAME')
-    password = os.environ.get('SAPPHIRE_SOCKS_PASSWORD')
+    username = env_get('SANI_SOCKS_USERNAME', 'SAPPHIRE_SOCKS_USERNAME')
+    password = env_get('SANI_SOCKS_PASSWORD', 'SAPPHIRE_SOCKS_PASSWORD')
     
     if username and password:
         logger.info("Using SOCKS credentials from environment variables")
@@ -549,7 +541,7 @@ def ensure_chat_database() -> bool:
     import sqlite3
     
     db_dir = Path(__file__).parent.parent / 'user' / 'history'
-    db_path = db_dir / 'sapphire_history.db'
+    db_path = history_db_path(db_dir)
     
     try:
         db_dir.mkdir(parents=True, exist_ok=True)

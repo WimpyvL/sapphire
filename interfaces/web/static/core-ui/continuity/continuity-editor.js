@@ -58,20 +58,10 @@ export default class ContinuityEditor {
     const t = this.task || {};
 
     // Build provider options - only enabled ones
-    const enabledProvs = this.llmProviders.filter(p => p.enabled);
-    const coreProvs = enabledProvs.filter(p => p.is_core);
-    const customProvs = enabledProvs.filter(p => !p.is_core);
-    let providerOptions = coreProvs
-      .map(p => `<option value="${p.key}" ${t.provider === p.key ? 'selected' : ''}>${p.display_name}</option>`)
+    const providerOptions = this.llmProviders
+      .filter(p => p.enabled)
+      .map(p => `<option value="${p.key}" ${t.provider === p.key ? 'selected' : ''}>${p.display_name}${p.is_local ? ' 🏠' : ' ☁️'}</option>`)
       .join('');
-    if (customProvs.length && coreProvs.length) {
-      providerOptions += '<option disabled>\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</option>';
-    }
-    providerOptions += customProvs
-      .map(p => {
-        const model = p.model ? ` (${p.model.split('/').pop()})` : '';
-        return `<option value="${p.key}" ${t.provider === p.key ? 'selected' : ''}>${p.display_name}${model}</option>`;
-      }).join('');
 
     // Build memory scope options
     const memoryScopeOptions = this.memoryScopes
@@ -212,44 +202,37 @@ export default class ContinuityEditor {
     const providerKey = providerSelect?.value || 'auto';
     const currentModel = this.task?.model || '';
     
-    // Hide both by default, reset disabled
+    // Hide both by default
     modelField.style.display = 'none';
     modelCustomField.style.display = 'none';
-    modelSelect.disabled = false;
-
+    
     if (providerKey === 'auto' || providerKey === 'none' || !providerKey) {
       return;
     }
-
+    
     const meta = this.llmMetadata[providerKey];
     const providerConfig = this.llmProviders.find(p => p.key === providerKey);
-    const isCore = providerConfig?.is_core;
-
-    if (isCore && meta?.model_options && Object.keys(meta.model_options).length > 0) {
-      // Core provider: show model dropdown with options
+    
+    if (meta?.model_options && Object.keys(meta.model_options).length > 0) {
+      // Provider has predefined model options - show dropdown
       const defaultModel = providerConfig?.model || '';
-      const defaultLabel = defaultModel ?
-        `Provider default (${meta.model_options[defaultModel] || defaultModel})` :
+      const defaultLabel = defaultModel ? 
+        `Provider default (${meta.model_options[defaultModel] || defaultModel})` : 
         'Provider default';
-
+      
       modelSelect.innerHTML = `<option value="">${defaultLabel}</option>` +
         Object.entries(meta.model_options)
           .map(([k, v]) => `<option value="${k}"${k === currentModel ? ' selected' : ''}>${v}</option>`)
           .join('');
-
+      
+      // Add current model if it's custom (not in list)
       if (currentModel && !meta.model_options[currentModel]) {
         modelSelect.innerHTML += `<option value="${currentModel}" selected>${currentModel}</option>`;
       }
-
+      
       modelField.style.display = '';
-    } else if (!isCore) {
-      // Custom provider: model is baked in, show as disabled
-      const model = providerConfig?.model || '(default)';
-      modelSelect.innerHTML = `<option value="${providerConfig?.model || ''}">${model}</option>`;
-      modelSelect.disabled = true;
-      modelField.style.display = '';
-    } else {
-      // Core without model_options — free-form
+    } else if (providerKey === 'other' || providerKey === 'lmstudio') {
+      // Free-form model input for "other" and lmstudio
       modelCustom.value = currentModel || '';
       modelCustomField.style.display = '';
     }

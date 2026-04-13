@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-# main.py - Sapphire Runner
-# Manages sapphire.py lifecycle with restart support
+# main.py - Sani Runner
+# Manages sani.py lifecycle with restart support
 #
-# Exit codes from sapphire.py:
+# Exit codes from sani.py:
 #   0  = Clean shutdown
 #   42 = Restart requested
 #   *  = Crash/error
@@ -18,6 +18,7 @@ import signal
 import time
 import argparse
 from pathlib import Path
+from core.identity import PRODUCT_NAME
 
 IS_WINDOWS = sys.platform == 'win32'
 
@@ -70,14 +71,14 @@ def handle_signal(signum, frame):
             pass  # Child already dead
     
 
-def run_sapphire():
-    """Run sapphire.py and return its exit code."""
+def run_sani():
+    """Run sani.py and return its exit code."""
     global _child_process
     
-    script_path = Path(__file__).parent / "sapphire.py"
+    script_path = Path(__file__).parent / "sani.py"
     
     if not script_path.exists():
-        log(f"ERROR: sapphire.py not found at {script_path}", RED)
+        log(f"ERROR: sani.py not found at {script_path}", RED)
         return 1
     
     try:
@@ -110,7 +111,7 @@ def run_sapphire():
         return 0  # Treat Ctrl+C as clean exit
 
     except Exception as e:
-        log(f"ERROR: Failed to run sapphire.py: {e}", RED)
+        log(f"ERROR: Failed to run sani.py: {e}", RED)
         _child_process = None
         return 1
 
@@ -118,7 +119,7 @@ def run_sapphire():
 def main():
     global _runner_stopping
     
-    parser = argparse.ArgumentParser(description='Sapphire Voice Assistant Runner')
+    parser = argparse.ArgumentParser(description=f'{PRODUCT_NAME} Voice Assistant Runner')
     parser.add_argument('--once', action='store_true', 
                         help='Run once without restart loop (for debugging)')
     parser.add_argument('--max-crashes', type=int, default=5,
@@ -132,11 +133,11 @@ def main():
     if hasattr(signal, 'SIGHUP'):
         signal.signal(signal.SIGHUP, handle_signal)
     
-    log("Sapphire Runner starting", GREEN)
+    log(f"{PRODUCT_NAME} Runner starting", GREEN)
     
     if args.once:
         log("Running in single-run mode (--once)", YELLOW)
-        exit_code = run_sapphire()
+        exit_code = run_sani()
         log(f"Exited with code {exit_code}")
         sys.exit(0 if exit_code in CLEAN_EXIT_CODES or exit_code == 42 else exit_code)
     
@@ -145,7 +146,7 @@ def main():
     
     while True:
         _runner_stopping = False
-        exit_code = run_sapphire()
+        exit_code = run_sani()
         
         # Check if runner itself was signaled to stop
         if _runner_stopping:

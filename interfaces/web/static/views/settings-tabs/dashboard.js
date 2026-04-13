@@ -28,32 +28,9 @@ export default {
                     <div class="dash-update-actions" id="dash-update-actions"></div>
                 </div>
                 <div class="dash-card">
-                    <h4>Quick Stats</h4>
-                    <div id="dash-quick-stats" class="dash-quick-stats">
-                        <span class="text-muted" style="font-size:var(--font-sm)">Loading...</span>
-                    </div>
-                </div>
-                <div class="dash-card">
-                    <h4>Backups</h4>
-                    <div id="dash-backup-status" class="text-muted" style="font-size:var(--font-sm);margin:0 0 8px">Checking...</div>
-                    <button class="btn-primary btn-sm" id="dash-backup-now">Backup Now</button>
-                </div>
-                <div class="dash-card">
-                    <h4>Help</h4>
-                    <p class="text-muted" style="font-size:var(--font-sm);margin:0 0 8px">Guides and troubleshooting</p>
-                    <button class="btn-primary btn-sm" id="dash-help">Open Help</button>
-                </div>
-                <div class="dash-card">
-                    <h4>Maintenance</h4>
-                    <div class="dash-controls" style="flex-direction:column;gap:6px">
-                        <button class="btn-sm" id="dash-force-update" style="width:100%">Force Update (git pull)</button>
-                        <button class="btn-sm" id="dash-clear-cache" style="width:100%">Clear JS Cache</button>
-                    </div>
-                </div>
-                <div class="dash-card dash-card-wide dash-deps-card" id="dash-deps-card" style="display:none">
-                    <h4>Missing Dependencies</h4>
-                    <div id="dash-deps-list" style="font-size:var(--font-sm)">
-                        <span class="text-muted">Checking...</span>
+                    <h4>Capabilities</h4>
+                    <div id="dash-capabilities" class="dash-capabilities">
+                        <span class="text-muted">Loading...</span>
                     </div>
                 </div>
                 <div class="dash-card dash-card-wide">
@@ -74,76 +51,11 @@ export default {
     },
 
     attachListeners(ctx, el) {
-        // Help button
-        el.querySelector('#dash-help')?.addEventListener('click', () => {
-            import('../../core/router.js').then(r => r.switchView('help'));
-        });
-
-        // Quick stats
-        loadQuickStats(el);
-
-        // Force update
-        el.querySelector('#dash-force-update')?.addEventListener('click', async () => {
-            const btn = el.querySelector('#dash-force-update');
-            if (!confirm('Pull latest code from git? Sapphire will restart after.')) return;
-            btn.disabled = true;
-            btn.textContent = 'Updating...';
-            try {
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                const res = await fetch('/api/system/update', { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                if (data.status === 'updated') {
-                    ui.showToast('Updated! Restarting...', 'success');
-                    setTimeout(() => pollForRestart(), 2000);
-                } else {
-                    ui.showToast(data.message || 'Already up to date', 'success');
-                    btn.disabled = false;
-                    btn.textContent = 'Force Update (git pull)';
-                }
-            } catch (e) {
-                ui.showToast(`Update failed: ${e.message}`, 'error');
-                btn.disabled = false;
-                btn.textContent = 'Force Update (git pull)';
-            }
-        });
-
-        // Clear JS cache
-        el.querySelector('#dash-clear-cache')?.addEventListener('click', () => {
-            if ('caches' in window) {
-                caches.keys().then(names => names.forEach(n => caches.delete(n)));
-            }
-            ui.showToast('Cache cleared — reloading...', 'success');
-            setTimeout(() => window.location.reload(true), 500);
-        });
-
-        // Backup
-        loadBackupStatus(el);
-        el.querySelector('#dash-backup-now')?.addEventListener('click', async () => {
-            const btn = el.querySelector('#dash-backup-now');
-            btn.disabled = true;
-            btn.textContent = 'Backing up...';
-            try {
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                const res = await fetch('/api/backup/create', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
-                    body: JSON.stringify({ type: 'manual' })
-                });
-                if (!res.ok) throw new Error(`HTTP ${res.status}`);
-                const data = await res.json();
-                ui.showToast(`Backup created: ${data.filename || 'done'}`, 'success');
-                loadBackupStatus(el);
-            } catch (e) { ui.showToast(`Backup failed: ${e.message}`, 'error'); }
-            finally { btn.disabled = false; btn.textContent = 'Backup Now'; }
-        });
-
         // Restart
         el.querySelector('#dash-restart')?.addEventListener('click', async () => {
-            if (!confirm('Restart Sapphire?')) return;
+            if (!confirm('Restart Sani?')) return;
             try {
-                const csrf1 = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                await fetch('/api/system/restart', { method: 'POST', headers: { 'X-CSRF-Token': csrf1 } });
+                await fetch('/api/system/restart', { method: 'POST' });
                 ui.showToast('Restarting...', 'success');
                 setTimeout(() => pollForRestart(), 2000);
             } catch { ui.showToast('Restart failed', 'error'); }
@@ -151,17 +63,16 @@ export default {
 
         // Shutdown
         el.querySelector('#dash-shutdown')?.addEventListener('click', async () => {
-            if (!confirm('Shut down Sapphire? You will need to restart it manually.')) return;
+            if (!confirm('Shut down Sani? You will need to restart it manually.')) return;
             try {
-                const csrf2 = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                await fetch('/api/system/shutdown', { method: 'POST', headers: { 'X-CSRF-Token': csrf2 } });
+                await fetch('/api/system/shutdown', { method: 'POST' });
                 ui.showToast('Shutting down...', 'success');
             } catch { ui.showToast('Shutdown failed', 'error'); }
         });
 
         checkForUpdate(el);
+        loadCapabilities(el);
         loadMetrics(el);
-        loadMissingDeps(el, ctx);
     }
 };
 
@@ -195,14 +106,14 @@ async function checkForUpdate(el) {
 
             if (updateStatus.is_fork) {
                 // Fork: show upstream version, link to releases, no update button
-                actionsEl.innerHTML = `<p class="text-muted" style="font-size:var(--font-xs);margin:0">Upstream update — get it from <a href="https://github.com/ddxfish/sapphire/releases" target="_blank">Sapphire releases</a></p>`;
+                actionsEl.innerHTML = `<p class="text-muted" style="font-size:var(--font-xs);margin:0">Fork detected. Point this link at your Sani release feed when it exists.</p>`;
             } else if (updateStatus.docker || updateStatus.managed) {
                 actionsEl.innerHTML = `<p class="text-muted" style="font-size:var(--font-xs);margin:0">Update via: <code>docker compose pull && docker compose up -d</code></p>`;
             } else if (updateStatus.has_git) {
                 actionsEl.innerHTML = `<button class="btn-primary btn-sm" id="dash-do-update">Update Now</button>`;
                 actionsEl.querySelector('#dash-do-update')?.addEventListener('click', () => doUpdate(el));
             } else {
-                actionsEl.innerHTML = `<p class="text-muted" style="font-size:var(--font-xs);margin:0">Download the latest release from <a href="https://github.com/ddxfish/sapphire/releases" target="_blank">GitHub</a></p>`;
+                actionsEl.innerHTML = `<p class="text-muted" style="font-size:var(--font-xs);margin:0">Set your Sani release URL here when distribution is finalized.</p>`;
             }
 
             window.dispatchEvent(new CustomEvent('update-available', { detail: updateStatus }));
@@ -228,8 +139,7 @@ async function doUpdate(el) {
     if (btn) { btn.disabled = true; btn.textContent = 'Updating...'; }
 
     try {
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-        const res = await fetch('/api/system/update', { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
+        const res = await fetch('/api/system/update', { method: 'POST' });
         if (!res.ok) {
             const err = await res.json();
             throw new Error(err.detail || 'Update failed');
@@ -262,120 +172,83 @@ function pollForRestart() {
 
 
 // =============================================================================
-// QUICK STATS
+// CAPABILITIES
 // =============================================================================
 
-async function loadQuickStats(el) {
-    const box = el.querySelector('#dash-quick-stats');
-    if (!box) return;
-    try {
-        const res = await fetch('/api/status');
-        if (!res.ok) { box.innerHTML = '<span class="text-muted" style="font-size:var(--font-sm)">Unavailable</span>'; return; }
-        const data = await res.json();
-        const chat = data.active_chat || '?';
-        const msgs = data.history_length || 0;
-        const ctx = data.context || {};
-        const tts = data.tts_state || {};
-        const stt = data.stt_state || {};
+async function loadCapabilities(el) {
+    const capEl = el.querySelector('#dash-capabilities');
+    if (!capEl) return;
 
-        box.innerHTML = `
-            <div style="display:flex;flex-direction:column;gap:4px;font-size:var(--font-sm)">
-                <div><span class="text-muted">Chat:</span> ${_esc(chat)} (${msgs} msgs)</div>
-                <div><span class="text-muted">Context:</span> ${ctx.percent || 0}% used${ctx.limit ? ` (${(ctx.used||0).toLocaleString()}/${ctx.limit.toLocaleString()})` : ''}</div>
-                <div><span class="text-muted">TTS:</span> ${tts.speaking ? '<span style="color:#4caf50">Speaking</span>' : 'Idle'}</div>
-                <div><span class="text-muted">STT:</span> ${stt.recording ? '<span style="color:#4fc3f7">Recording</span>' : 'Idle'}</div>
+    try {
+        const res = await fetch('/api/system/capabilities');
+        if (!res.ok) throw new Error('Capabilities fetch failed');
+        const data = await res.json();
+        renderCapabilities(capEl, data);
+    } catch (e) {
+        capEl.innerHTML = '<span class="text-muted">Could not load runtime capabilities</span>';
+    }
+}
+
+function renderCapabilities(el, data) {
+    const providers = data.providers || {};
+    const warnings = data.startup_warnings || [];
+    const packages = data.packages || {};
+    const webBadge = data.web_first
+        ? '<span class="dash-pill ok">Web-first</span>'
+        : '<span class="dash-pill warn">Legacy mode</span>';
+
+    const providerRows = [
+        ['Speech', providers.stt, packages.stt],
+        ['Voice', providers.tts, packages.tts],
+        ['Wake Word', providers.wakeword, packages.wakeword],
+    ].map(([label, provider, pkg]) => {
+        const status = provider?.status || 'disabled';
+        const configured = provider?.configured || 'none';
+        const reason = provider?.reason || '';
+        const pillClass = status === 'ready' ? 'ok' : status === 'error' ? 'warn' : 'muted';
+        const installHint = pkg && !pkg.installed ? `<div class="dash-subtle">Install: <code>pip install -r ${pkg.requirements}</code></div>` : '';
+        return `
+            <div class="dash-cap-row">
+                <div>
+                    <div class="dash-cap-label">${label}</div>
+                    <div class="dash-subtle">Configured: ${configured}</div>
+                    ${reason ? `<div class="dash-subtle">${reason}</div>` : ''}
+                    ${installHint}
+                </div>
+                <span class="dash-pill ${pillClass}">${status}</span>
             </div>
         `;
-    } catch { box.innerHTML = '<span class="text-muted" style="font-size:var(--font-sm)">Stats unavailable</span>'; }
-}
+    }).join('');
 
-// =============================================================================
-// MISSING DEPENDENCIES
-// =============================================================================
+    const installTracks = Object.entries(data.install_tracks || {}).map(([key, track]) => `
+        <div class="dash-track">
+            <div class="dash-cap-label">${track.label}</div>
+            <div class="dash-subtle">${track.summary}</div>
+            <div class="dash-subtle"><code>${track.requirements.join('</code> + <code>')}</code></div>
+        </div>
+    `).join('');
 
-async function loadMissingDeps(el, ctx) {
-    const card = el.querySelector('#dash-deps-card');
-    const list = el.querySelector('#dash-deps-list');
-    if (!card || !list) return;
-
-    try {
-        const res = await fetch('/api/webui/plugins');
-        if (!res.ok) return;
-        const data = await res.json();
-        const withDeps = (data.plugins || []).filter(p => p.missing_deps?.length);
-
-        if (!withDeps.length) {
-            card.style.display = 'none';
-            return;
-        }
-
-        card.style.display = '';
-        card.style.borderLeft = '3px solid #e0a030';
-        list.innerHTML = withDeps.map(p => `
-            <div style="display:flex;align-items:center;gap:8px;padding:4px 0;">
-                <span>${p.icon || '\uD83D\uDD0C'}</span>
-                <span style="flex:1"><strong>${_esc(p.title || p.name)}</strong> needs: ${_esc(p.missing_deps.join(', '))}</span>
-                <button class="btn btn-sm dash-deps-fix" data-plugin="${_esc(p.name)}"
-                    style="font-size:0.75em;padding:2px 10px;background:rgba(255,165,0,0.2);border:1px solid rgba(255,165,0,0.4);color:#e0a030;cursor:pointer;border-radius:var(--radius-sm)">
-                    Fix
-                </button>
+    el.innerHTML = `
+        <div class="dash-cap-head">
+            ${webBadge}
+            ${data.running?.privacy_mode ? '<span class="dash-pill muted">Privacy mode</span>' : ''}
+            ${data.running?.docker ? '<span class="dash-pill muted">Docker</span>' : ''}
+            ${data.running?.managed ? '<span class="dash-pill muted">Managed</span>' : ''}
+        </div>
+        <div class="dash-cap-list">${providerRows}</div>
+        ${warnings.length ? `
+            <div class="dash-warning-box">
+                <div class="dash-cap-label">Startup Warnings</div>
+                ${warnings.map(w => `<div class="dash-subtle">${w}</div>`).join('')}
             </div>
-        `).join('');
-
-        // Fix buttons → navigate to plugins tab
-        list.querySelectorAll('.dash-deps-fix').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const settingsView = el.closest('.settings-view') || el.closest('[data-view="settings"]');
-                if (settingsView) {
-                    settingsView.dispatchEvent(new CustomEvent('settings-navigate', { detail: { tab: 'plugins' }, bubbles: true }));
-                }
-            });
-        });
-    } catch { card.style.display = 'none'; }
+        ` : ''}
+        <div class="dash-track-box">
+            <div class="dash-cap-label">Install Tracks</div>
+            ${installTracks}
+        </div>
+    `;
 }
 
-function _esc(s) { return String(s || '').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
-
-// =============================================================================
-// BACKUP STATUS
-// =============================================================================
-
-async function loadBackupStatus(el) {
-    const statusEl = el.querySelector('#dash-backup-status');
-    if (!statusEl) return;
-    try {
-        const res = await fetch('/api/backup/list');
-        if (!res.ok) { statusEl.textContent = 'Could not check backups'; return; }
-        const data = await res.json();
-        const backups = data.backups || {};
-        const all = [...(backups.daily || []), ...(backups.weekly || []), ...(backups.monthly || []), ...(backups.manual || [])];
-        if (all.length === 0) {
-            statusEl.textContent = 'No backups yet';
-        } else {
-            // Sort by date+time string (format: YYYY-MM-DD + HHMMSS)
-            all.sort((a, b) => (`${b.date}_${b.time}`).localeCompare(`${a.date}_${a.time}`));
-            const latest = all[0];
-            const ago = _backupTimeAgo(latest.date, latest.time);
-            const sizeMB = latest.size ? ` \u00b7 ${(latest.size / 1048576).toFixed(0)} MB` : '';
-            statusEl.textContent = `${all.length} backups \u00b7 Latest: ${ago}${sizeMB}`;
-        }
-    } catch { statusEl.textContent = 'Backup status unavailable'; }
-}
-
-function _backupTimeAgo(dateStr, timeStr) {
-    if (!dateStr) return 'unknown';
-    // Parse "2026-03-27" + "030000" → ms since epoch
-    const h = timeStr?.slice(0, 2) || '00', m = timeStr?.slice(2, 4) || '00', s = timeStr?.slice(4, 6) || '00';
-    const parts = dateStr.split('-');
-    const d = new Date(+parts[0], +parts[1] - 1, +parts[2], +h, +m, +s);
-    if (isNaN(d.getTime())) return dateStr;
-    const sec = Math.floor((Date.now() - d.getTime()) / 1000);
-    if (sec < 0) return 'just now';
-    if (sec < 60) return 'just now';
-    if (sec < 3600) return `${Math.floor(sec / 60)}m ago`;
-    if (sec < 86400) return `${Math.floor(sec / 3600)}h ago`;
-    return `${Math.floor(sec / 86400)}d ago`;
-}
 
 // =============================================================================
 // TOKEN METRICS

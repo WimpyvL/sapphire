@@ -7,6 +7,7 @@ import uuid
 from typing import Dict, Any, Optional, List
 
 import config
+from core.identity import PRODUCT_NAME, DEFAULT_PROMPT
 from .history import ConversationHistory, ChatSessionManager, count_tokens
 from .function_manager import FunctionManager
 from core.hooks import hook_runner, HookEvent
@@ -47,8 +48,6 @@ def friendly_llm_error(e):
 
     # Connection errors — detect local providers like LM Studio
     if isinstance(e, ConnectionError) or 'ConnectError' in type_name or 'connection' in error_str:
-        if 'no llm' in error_str or 'no providers' in error_str:
-            return "No LLM providers are configured or available. Go to Settings to add an API key and enable a provider."
         if any(h in error_str for h in ('127.0.0.1', 'localhost', '0.0.0.0')):
             return "Can't reach LM Studio — open LM Studio, load a model, and enable its local server."
         return "Lost connection to the LLM server. Check that the service is running."
@@ -56,10 +55,6 @@ def friendly_llm_error(e):
     status = getattr(e, 'status_code', None)
     if not status:
         return None
-
-    # Context size exceeded — catch before status code checks (some providers raise without HTTP status)
-    if any(k in error_str for k in ('context size', 'context length', 'context_length', 'maximum context', 'token limit')):
-        return "Context limit exceeded — conversation is too long for this model. Lower CONTEXT_LIMIT in Settings or start a new chat."
 
     if status == 400:
         if 'model' in error_str and any(k in error_str for k in ('not found', 'not loaded', 'does not exist')):
@@ -222,7 +217,7 @@ class LLMChat:
 
     def _get_system_prompt(self):
         username = getattr(config, 'DEFAULT_USERNAME', 'Human Scum')
-        ai_name = 'Sapphire'
+        ai_name = PRODUCT_NAME
         # Sanitize curly brackets to prevent template injection
         username = username.replace('{', '').replace('}', '')
         prompt_template = self.current_system_prompt or "System prompt not loaded."
@@ -500,7 +495,7 @@ class LLMChat:
             gen_params = get_generation_params(
                 provider_key, 
                 effective_model, 
-                {**getattr(config, 'LLM_PROVIDERS', {}), **getattr(config, 'LLM_CUSTOM_PROVIDERS', {})}
+                getattr(config, 'LLM_PROVIDERS', {})
             )
             
             # Pass model override to provider if set
@@ -841,7 +836,7 @@ class LLMChat:
         """Select LLM provider using per-chat settings or fallback order. Returns (provider_key, provider, model_override) tuple or raises."""
         
         if self._use_new_config:
-            providers_config = {**config.LLM_PROVIDERS, **getattr(config, 'LLM_CUSTOM_PROVIDERS', {})}
+            providers_config = config.LLM_PROVIDERS
             fallback_order = getattr(config, 'LLM_FALLBACK_ORDER', list(providers_config.keys()))
             
             # Check per-chat LLM settings
@@ -969,7 +964,7 @@ class LLMChat:
 
         try:
             # Build system prompt from task settings
-            prompt_name = task_settings.get("prompt", "sapphire")
+            prompt_name = task_settings.get("prompt", DEFAULT_PROMPT)
             from core import prompts
             prompt_data = prompts.get_prompt(prompt_name)
             if prompt_data:
@@ -979,7 +974,7 @@ class LLMChat:
             
             # Apply name substitutions
             username = getattr(config, 'DEFAULT_USERNAME', 'Human')
-            ai_name = 'Sapphire'
+            ai_name = PRODUCT_NAME
             system_prompt = system_prompt.replace("{user_name}", username).replace("{ai_name}", ai_name)
             
             # Inject datetime if enabled (user's timezone)
@@ -1026,7 +1021,7 @@ class LLMChat:
             model_override = task_settings.get("model", "")
             
             if provider_key and provider_key not in ("auto", ""):
-                providers_config = {**getattr(config, 'LLM_PROVIDERS', {}), **getattr(config, 'LLM_CUSTOM_PROVIDERS', {})}
+                providers_config = getattr(config, 'LLM_PROVIDERS', {})
                 provider = get_provider_by_key(provider_key, providers_config, config.LLM_REQUEST_TIMEOUT, model_override=model_override)
                 if not provider:
                     raise ConnectionError(f"Provider '{provider_key}' not available")
@@ -1037,7 +1032,7 @@ class LLMChat:
             gen_params = get_generation_params(
                 provider_key, 
                 effective_model, 
-                {**getattr(config, 'LLM_PROVIDERS', {}), **getattr(config, 'LLM_CUSTOM_PROVIDERS', {})}
+                getattr(config, 'LLM_PROVIDERS', {})
             )
             if model_override:
                 gen_params['model'] = model_override

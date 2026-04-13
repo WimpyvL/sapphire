@@ -1,7 +1,5 @@
 // settings-tabs/tts.js - Text-to-speech provider settings
-import { renderProviderTab, attachProviderListeners, mergeRegistryProviders } from '../../shared/provider-selector.js';
-
-let _mergedConfig = null;
+import { renderProviderTab, attachProviderListeners } from '../../shared/provider-selector.js';
 
 const tabConfig = {
     providerKey: 'TTS_PROVIDER',
@@ -20,6 +18,16 @@ const tabConfig = {
                 'TTS_SERVER_HOST', 'TTS_SERVER_PORT',
                 'TTS_PRIMARY_SERVER', 'TTS_FALLBACK_SERVER', 'TTS_FALLBACK_TIMEOUT'
             ]
+        },
+        elevenlabs: {
+            label: 'ElevenLabs (Cloud)',
+            essentialKeys: ['TTS_ELEVENLABS_API_KEY', 'TTS_ELEVENLABS_MODEL', 'TTS_ELEVENLABS_VOICE_ID'],
+            advancedKeys: []
+        },
+        sapphire_router: {
+            label: 'Sapphire Router',
+            essentialKeys: ['SAPPHIRE_ROUTER_URL', 'SAPPHIRE_ROUTER_TENANT_ID'],
+            advancedKeys: []
         }
     },
 
@@ -34,8 +42,7 @@ export default {
     description: 'Text-to-speech engine configuration',
 
     render(ctx) {
-        const cfg = _mergedConfig || tabConfig;
-        let html = renderProviderTab(cfg, ctx);
+        let html = renderProviderTab(tabConfig, ctx);
         html += `
             <div class="settings-grid" style="margin-top: 1rem;">
                 <div class="setting-row full-width">
@@ -48,19 +55,8 @@ export default {
         return html;
     },
 
-    async attachListeners(ctx, el) {
-        // Always re-fetch plugin providers (plugins may have been toggled)
-        {
-            _mergedConfig = await mergeRegistryProviders(tabConfig);
-            // Re-render dropdown if new providers were added
-            if (Object.keys(_mergedConfig.providers).length > Object.keys(tabConfig.providers).length) {
-                const body = el.querySelector('.settings-tab-body') || el;
-                body.innerHTML = this.render(ctx);
-                if (ctx.attachAccordionListeners) ctx.attachAccordionListeners(el);
-            }
-        }
-        const cfg = _mergedConfig || tabConfig;
-        attachProviderListeners(cfg, ctx, el, this);
+    attachListeners(ctx, el) {
+        attachProviderListeners(tabConfig, ctx, el, this);
 
         const btn = el.querySelector('#tts-test-btn');
         const result = el.querySelector('#tts-test-result');
@@ -70,8 +66,7 @@ export default {
             result.textContent = '';
             result.style.color = '';
             try {
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                const res = await fetch('/api/tts/test', { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
+                const res = await fetch('/api/tts/test', { method: 'POST' });
                 if (!res.ok) throw new Error(`Server error (${res.status})`);
                 const data = await res.json();
                 if (data.success) {

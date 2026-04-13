@@ -24,14 +24,6 @@
         ],
         "task_fields": [
           {
-            "key": "account",
-            "type": "select",
-            "label": "Email Account",
-            "required": true,
-            "dynamic": "/api/email/accounts",
-            "help": "Which email account this daemon monitors. Only this account will be polled."
-          },
-          {
             "key": "auto_reply",
             "type": "boolean",
             "label": "Auto-reply to sender",
@@ -55,15 +47,7 @@
         "label": "Allow sending to any address",
         "default": false,
         "help": "WARNING: When enabled, the AI can email anyone — not just whitelisted contacts. It can use recipient IDs from People OR type an email address directly. Use with caution.",
-        "confirm": {
-          "values": ["true"],
-          "title": "Allow Unrestricted Email",
-          "warnings": [
-            "The AI will be able to email ANY address — not just whitelisted contacts",
-            "This bypasses the People whitelist safety net entirely"
-          ],
-          "buttonLabel": "I understand, enable it"
-        }
+        "confirm": "allow_all_recipients"
       }
     ]
   }

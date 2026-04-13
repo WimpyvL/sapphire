@@ -15,6 +15,7 @@ import logging
 import time
 from pathlib import Path
 from typing import Tuple
+from core.identity import PLUGIN_VERIFY_USER_AGENT
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from cryptography.exceptions import InvalidSignature
@@ -123,7 +124,7 @@ def _fetch_remote_keys() -> list | None:
         import urllib.request
         import ssl
         ctx = ssl.create_default_context()
-        req = urllib.request.Request(url, headers={"User-Agent": "Sapphire-PluginVerify/1.0"})
+        req = urllib.request.Request(url, headers={"User-Agent": PLUGIN_VERIFY_USER_AGENT})
         with urllib.request.urlopen(req, timeout=10, context=ctx) as resp:
             data = json.loads(resp.read().decode("utf-8"))
             keys = data.get("keys", [])

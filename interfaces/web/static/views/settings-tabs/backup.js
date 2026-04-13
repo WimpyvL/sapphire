@@ -23,7 +23,7 @@ export default {
             <div class="backup-info" style="margin:16px 0;padding:12px 16px;background:var(--bg-secondary);border-radius:8px;font-size:var(--font-sm);line-height:1.6">
                 <div style="margin-bottom:8px"><strong>Included in backups:</strong></div>
                 <div style="color:var(--text-secondary)">
-                    Chat history, prompts, toolsets, spices, scheduled tasks,
+Chat history, prompts, toolsets, tone packs, scheduled tasks,
                     settings, memories, knowledge, AI notes, user plugins,
                     plugin state, and avatars
                 </div>
@@ -37,7 +37,7 @@ export default {
                 <div style="margin:10px 0 4px"><strong>Not included:</strong></div>
                 <div style="color:var(--text-muted)">
                     API keys and credentials (LLM keys, email passwords, SSH servers,
-                    bitcoin wallets) are stored separately at ~/.config/sapphire/ for
+                    bitcoin wallets) are stored separately at ~/.config/sani/ for
                     security and are not part of the backup archive
                 </div>
                 `}

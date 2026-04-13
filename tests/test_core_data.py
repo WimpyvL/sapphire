@@ -134,7 +134,7 @@ class TestChatSessionManager:
         manager = ChatSessionManager(history_dir=temp_history_dir)
 
         # Now uses SQLite - check database exists and default chat is loaded
-        db_path = Path(temp_history_dir) / "sapphire_history.db"
+        db_path = Path(temp_history_dir) / "sani_history.db"
         assert db_path.exists()
         assert manager.active_chat_name == "default"
     

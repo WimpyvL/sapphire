@@ -5,7 +5,7 @@ const TABS = [
     { id: 'personas', label: 'Personas', icon: '\u{1F3AD}' },
     { id: 'prompts', label: 'Prompts', icon: '\u{1F464}' },
     { id: 'toolsets', label: 'Toolsets', icon: '\u{1F527}' },
-    { id: 'spices', label: 'Spices', icon: '\u{1F336}\u{FE0F}' },
+    { id: 'spices', label: 'Tone Packs', icon: '\u{1F3A8}' },
 ];
 
 /**

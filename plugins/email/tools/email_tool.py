@@ -115,7 +115,7 @@ TOOLS = [
     },
 ]
 
-# Build send_email schema — always include address param, runtime check gates it
+# Build send_email schema — add address param if allow-all is enabled
 _send_props = {
     "recipient_id": {
         "type": "integer",
@@ -133,12 +133,15 @@ _send_props = {
         "type": "string",
         "description": "Email body text"
     },
-    "address": {
-        "type": "string",
-        "description": "Email address to send to directly (only works when allow-all-recipients is enabled in settings). Use this OR recipient_id, not both."
-    },
 }
-_send_desc = "Send an email. For contacts use recipient_id (from get_recipients). For any address use the address parameter directly (requires allow-all setting). For replies use reply_to_index (from get_inbox)."
+_send_desc = "Send an email to a whitelisted contact, or reply to an inbox message. For new emails use recipient_id. For replies use reply_to_index (from get_inbox) — the recipient is resolved from the original message automatically."
+
+if _allow_all_enabled():
+    _send_props["address"] = {
+        "type": "string",
+        "description": "Email address to send to directly (only when allow-all is enabled). Use this OR recipient_id, not both."
+    }
+    _send_desc = "Send an email. For contacts use recipient_id (from get_recipients). For any address use the address parameter directly. For replies use reply_to_index (from get_inbox)."
 
 TOOLS.append({
     "type": "function",
@@ -523,13 +526,9 @@ def _get_inbox(count=20, folder="inbox"):
 
     except imaplib.IMAP4.error as e:
         logger.error(f"IMAP error: {e}")
-        try: imap.logout()
-        except Exception: pass
         return f"Email login failed — check credentials. Error: {e}", False
     except Exception as e:
         logger.error(f"Email {folder} error: {e}", exc_info=True)
-        try: imap.logout()
-        except Exception: pass
         return f"Failed to fetch {folder}: {e}", False
 
 
@@ -563,7 +562,7 @@ def _read_email(index):
         return f"Invalid index {index}. Range: 1-{len(cache['raw'])}.", False
 
     msg = cache["raw"][index - 1]
-    sender = _extract_sender_name(msg.get('From', 'Unknown'))
+    sender = msg.get('From', 'Unknown')
     subject = _decode_header_value(msg.get('Subject', '(no subject)'))
     date_str = msg.get('Date', '?')
     body = _extract_body(msg)
@@ -599,8 +598,6 @@ def _mark_as_read(index):
         logger.info(f"Email [{index}] marked as read")
     except Exception as e:
         logger.warning(f"Failed to mark email as read: {e}")
-        try: imap.logout()
-        except Exception: pass
 
 
 def _archive_emails(indices):
@@ -651,8 +648,6 @@ def _archive_emails(indices):
 
     except Exception as e:
         logger.error(f"Archive error: {e}", exc_info=True)
-        try: imap.logout()
-        except Exception: pass
         return f"Failed to archive: {e}", False
 
 

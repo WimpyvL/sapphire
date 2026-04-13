@@ -93,7 +93,7 @@ class SetupWizard {
     this.modal.innerHTML = `
       <div class="setup-wizard">
         <div class="setup-wizard-header">
-          <h2>💎 Welcome to Sapphire</h2>
+                <h2>💎 Welcome to Sani</h2>
         </div>
 
         <div class="setup-steps">
@@ -335,7 +335,7 @@ class SetupWizard {
       // Footer with restart button
       this.modal.querySelector('.setup-wizard-footer').innerHTML = `
         <button class="btn btn-secondary" id="setup-skip-restart">Skip for Now</button>
-        <button class="btn btn-primary" id="setup-restart">Restart Sapphire</button>
+                    <button class="btn btn-primary" id="setup-restart">Restart Sani</button>
       `;
 
       this.modal.querySelector('#setup-skip-restart').addEventListener('click', () => {
@@ -381,15 +381,14 @@ class SetupWizard {
     }
 
     try {
-      const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-      const res = await fetch('/api/system/restart', { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
+      const res = await fetch('/api/system/restart', { method: 'POST' });
       if (res.ok) {
         // Show restarting message
         const content = this.modal.querySelector('.setup-wizard-content');
         content.innerHTML = `
           <div class="success-screen">
             <div class="spinner-large">⏳</div>
-            <h3>Restarting Sapphire...</h3>
+                <h3>Restarting Sani...</h3>
             <p>Page will reload automatically.</p>
           </div>
         `;
@@ -398,12 +397,12 @@ class SetupWizard {
         // Poll for server to come back, then reload
         this.waitForRestart();
       } else {
-        alert('Failed to restart. Please restart Sapphire manually.');
+            alert('Failed to restart. Please restart Sani manually.');
         this.close();
       }
     } catch (e) {
       console.error('Restart request failed:', e);
-      alert('Failed to restart. Please restart Sapphire manually.');
+            alert('Failed to restart. Please restart Sani manually.');
       this.close();
     }
   }
@@ -476,7 +475,7 @@ class SetupWizard {
           <h3>You're all set!</h3>
           <p class="provider-loading-hint">
             <span class="spinner">&midcir;</span>
-            Models still downloading — Sapphire will activate them automatically when ready.
+                    Models still downloading — Sani will activate them automatically when ready.
           </p>
         </div>
       `;
@@ -493,7 +492,7 @@ class SetupWizard {
             <div class="success-icon">✓</div>
           </div>
           <h3>You're all set!</h3>
-          <p>Sapphire is ready to chat.</p>
+                <p>Sani is ready to chat.</p>
         </div>
       `;
     }

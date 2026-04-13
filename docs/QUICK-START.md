@@ -7,31 +7,23 @@ You've installed Sapphire and opened it in your browser. The setup wizard walks 
 On first launch, the wizard handles the essentials:
 
 1. **Name your AI** — Give it a name and pick yours
-2. **Choose an LLM** — Local or cloud
+2. **Choose an LLM** — Local (LM Studio) or cloud (Claude, OpenAI, Fireworks)
 3. **Test the connection** — Wizard verifies the LLM responds
 
 If you skip the wizard, you can always configure the LLM later in Settings → LLM.
 
 ### LLM Options
 
-**Built-in providers:**
-
 | Option | Privacy | Needs | Best For |
 |--------|---------|-------|----------|
 | **LM Studio** (local) | Full privacy | GPU, 16GB+ RAM | Private use, stories |
-| **Ollama** (local) | Full privacy | GPU, 8GB+ RAM | Easy local setup |
 | **Claude** (cloud) | Conversations sent to Anthropic | API key | Complex reasoning, coding |
 | **OpenAI** (cloud) | Conversations sent to OpenAI | API key | General purpose |
-| **Gemini** (cloud) | Conversations sent to Google | API key | Fast, multimodal |
 | **Fireworks** (cloud) | Conversations sent to Fireworks | API key | Fast, open models |
 
-Local: Install [LM Studio](https://lmstudio.ai/) or [Ollama](https://ollama.com/), load a model, enable the API. Sapphire connects automatically.
+Local: Install [LM Studio](https://lmstudio.ai/), load a model, enable the API. Sapphire connects automatically.
 
 Cloud: Get an API key from the provider and enter it in Settings → Credentials.
-
-**Custom providers:** Any endpoint that speaks the OpenAI, Anthropic, or Responses API spec works — add it as a custom provider in Settings → LLM. This covers most local and cloud services (vLLM, text-generation-webui, Together, Groq, etc.).
-
-**Plugin providers:** If a future LLM doesn't fit any of these specs, plugins can register entirely custom LLM backends via the provider system. See [Providers](plugin-author/providers.md).
 
 ---
 
@@ -151,11 +143,7 @@ Set scopes in **Chat Settings → Mind Scopes** (or they come bundled with a per
 | **People** | Contacts | Yes |
 | **Email** | Email account | No |
 | **Bitcoin** | Wallet | No |
-| **Google Cal** | Calendar account | No |
-| **Telegram** | Telegram account | No |
-| **Discord** | Discord account | No |
 | **RAG** | Per-chat documents | No (strict) |
-| **Private** | No memory writes | N/A (boolean) |
 
 **How global overlay works:** Memory, goals, knowledge, and people scopes see their own data AND anything in the "global" scope. So shared info (your name, your preferences) lives in global and every scope sees it, while specialized data stays isolated.
 
@@ -173,7 +161,7 @@ Some LLMs can think through problems step-by-step before answering. This improve
 |----------|---------|---------------|
 | **Claude** | Extended Thinking | Settings → LLM → Claude → Extended Thinking toggle |
 | **GPT-5.x** | Reasoning Summaries | Set `reasoning_effort` (low/medium/high) and `reasoning_summary` |
-| **Gemini** | Reasoning Effort | Set `reasoning_effort` (low/medium/high) on thinking-enabled models |
+| **Fireworks** | Reasoning Effort | Use thinking-enabled models (Qwen3-Thinking, Kimi-K2-Thinking) |
 
 **Claude Extended Thinking:** Set a budget (default 10,000 tokens). Thinking blocks are preserved across tool calls. Good for complex tasks, overkill for casual chat.
 
@@ -199,7 +187,7 @@ Connect Sapphire to your Telegram account.
 4. Scroll down → **+ Add Account** → enter phone → enter code Telegram sends you
 5. Enable Telegram tools in your toolset
 
-Now the AI can read your chats and send messages. See the Telegram plugin docs in Help → Plugins for full details.
+Now the AI can read your chats and send messages. See [TELEGRAM.md](integrations/TELEGRAM.md) for full details.
 
 ---
 
@@ -213,7 +201,7 @@ Connect a Discord bot to your server.
 4. In Sapphire: Settings → Plugins → Discord → paste bot token
 5. Enable Discord tools in your toolset
 
-The AI can read channels and send messages. See the Discord plugin docs in Help → Plugins for full details.
+The AI can read channels and send messages. See [DISCORD.md](integrations/DISCORD.md) for full details.
 
 ---
 
@@ -227,7 +215,7 @@ Connect your email inbox.
 3. Enable Email tools in your toolset
 4. Add contacts in **Mind → People** to whitelist who the AI can email
 
-The AI can read your inbox and send emails — but only to people you've added to contacts. See the Email plugin docs in Help → Plugins for full details.
+The AI can read your inbox and send emails — but only to people you've added to contacts. See [EMAIL.md](integrations/EMAIL.md) for full details.
 
 ---
 
@@ -324,11 +312,10 @@ PERSONA CREATION:
 - Quick switch: chat sidebar persona grid
 - Set as Default: star icon (applies to new chats)
 
-SCOPES (11 types):
+SCOPES (7 types):
 - memory, goal, knowledge, people: global overlay (sees own + global)
-- email, bitcoin, gcal, telegram, discord: no overlay (strict per-scope)
+- email, bitcoin: no overlay (strict per-scope)
 - rag: strict per-chat isolation
-- private: boolean (no memory writes)
 - Set per-chat in Chat Settings → Mind Scopes
 - "none" disables a system for that chat
 - Create new scopes with + button
@@ -336,7 +323,7 @@ SCOPES (11 types):
 EXTENDED THINKING:
 - Claude: Extended Thinking toggle, budget default 10,000 tokens
 - GPT-5.x: reasoning_effort (low/medium/high) + reasoning_summary
-- Gemini: reasoning_effort (low/medium/high) on thinking-enabled models
+- Fireworks: thinking-enabled models (Qwen3-Thinking, Kimi-K2-Thinking)
 
 OPTIONAL INTEGRATIONS:
 - Telegram: my.telegram.org API ID/Hash → plugin settings

@@ -54,3 +54,11 @@ userz
 MEMORIES.md
 claude
 infra
+sapphire-config/
+sapphire-data/
+sapphire-backups/
+run-logs/
+user/
+user_backups/
+*.log
+*.db

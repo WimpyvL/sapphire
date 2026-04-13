@@ -1,4 +1,4 @@
-// views/spices.js - Spice manager view with spice sets
+// views/spices.js - Tone pack manager view with legacy spice-set APIs
 import { getSpices, addSpice, updateSpice, deleteSpice, addCategory, renameCategory, deleteCategory, toggleCategory, reloadSpices,
          getSpiceSets, getCurrentSpiceSet, activateSpiceSet, saveCustomSpiceSet, deleteSpiceSet, setSpiceSetEmoji, setCategoryEmoji } from '../shared/spice-api.js';
 import { renderPersonaTabs, bindPersonaTabs } from '../shared/persona-tabs.js';
@@ -7,7 +7,7 @@ import * as ui from '../ui.js';
 import { updateScene } from '../features/scene.js';
 
 const DEFAULT_ICONS = {
-    default: '\u{1F336}\u{FE0F}', companion: '\u{1F49C}', professional: '\u{1F4BC}',
+    default: '\u{1F3A8}', companion: '\u{1F49C}', professional: '\u{1F4BC}',
     all: '\u{1F525}', none: '\u{26D4}'
 };
 
@@ -46,7 +46,7 @@ async function loadData() {
         if (!selectedSetName || !spiceSets.some(s => s.name === selectedSetName))
             selectedSetName = currentSetName || 'default';
     } catch (e) {
-        console.warn('Spice sets load failed:', e);
+        console.warn('Tone packs load failed:', e);
     }
 }
 
@@ -67,8 +67,8 @@ function render() {
         <div class="two-panel">
             <div class="panel-left panel-list">
                 <div class="panel-list-header">
-                    <span class="panel-list-title">Spice Sets</span>
-                    <button class="btn-sm" id="ss-import" title="Import spice set">\u2B07</button>
+                    <span class="panel-list-title">Tone Packs</span>
+                    <button class="btn-sm" id="ss-import" title="Import tone pack">\u2B07</button>
                     <button class="btn-sm" id="ss-new" title="Save current as new">+</button>
                 </div>
                 <div class="panel-list-items" id="ss-list">
@@ -103,7 +103,7 @@ function render() {
                 <div class="view-body view-scroll">
                     <div class="ss-actions-bar">
                         <button class="btn-sm" id="spice-add-cat">+ Category</button>
-                        <button class="btn-sm" id="spice-reload" title="Reload spice pool from disk">Reload Pool</button>
+                        <button class="btn-sm" id="spice-reload" title="Reload tone cue pool from disk">Reload Pool</button>
                     </div>
                     <div class="spice-list" id="ss-categories">
                         ${renderCategories(enabledSet)}
@@ -117,7 +117,7 @@ function render() {
 }
 
 function renderCategories(enabledSet) {
-    if (!spiceData?.categories) return '<p class="text-muted" style="padding:20px">No categories available</p>';
+    if (!spiceData?.categories) return '<p class="text-muted" style="padding:20px">No tone categories available</p>';
 
     const cats = spiceData.categories;
     return Object.entries(cats).map(([name, cat]) => {
@@ -140,11 +140,11 @@ function renderCategories(enabledSet) {
                 <div class="spice-cat-body">
                     <div class="spice-cat-inner">
                         <div class="spice-cat-actions">
-                            <button class="btn-sm" data-action="add-spice" data-cat="${name}">+ Spice</button>
+                            <button class="btn-sm" data-action="add-spice" data-cat="${name}">+ Cue</button>
                             <button class="btn-icon" data-action="rename-cat" data-cat="${name}" title="Rename">&#x270F;</button>
                             <button class="btn-icon danger" data-action="delete-cat" data-cat="${name}" title="Delete category">&times;</button>
                         </div>
-                        ${spices.length === 0 ? '<div class="text-muted" style="padding:8px;font-size:var(--font-sm)">Empty \u2014 add a spice above</div>' :
+                        ${spices.length === 0 ? '<div class="text-muted" style="padding:8px;font-size:var(--font-sm)">Empty \u2014 add a cue above</div>' :
                         spices.map((text, i) => `
                             <div class="spice-item">
                                 <span class="spice-text">${escapeHtml(text)}</span>
@@ -229,7 +229,7 @@ function bindEvents() {
         try {
             await activateSpiceSet(selectedSetName);
             currentSetName = selectedSetName;
-            ui.showToast(`Activated: ${selectedSetName}`, 'success');
+            ui.showToast(`Activated tone pack: ${selectedSetName}`, 'success');
             updateScene();
             render();
         } catch (e) { ui.showToast('Failed to activate', 'error'); }
@@ -237,7 +237,7 @@ function bindEvents() {
 
     // New set
     container.querySelector('#ss-new')?.addEventListener('click', async () => {
-        const name = prompt('New spice set name:');
+        const name = prompt('New tone pack name:');
         if (!name?.trim()) return;
         const categories = collectEnabledCategories();
         try {
@@ -251,7 +251,7 @@ function bindEvents() {
 
     // Delete set
     container.querySelector('#ss-delete')?.addEventListener('click', async () => {
-        if (!confirm(`Delete spice set "${selectedSetName}"?`)) return;
+        if (!confirm(`Delete tone pack "${selectedSetName}"?`)) return;
         try {
             await deleteSpiceSet(selectedSetName);
             ui.showToast(`Deleted: ${selectedSetName}`, 'success');
@@ -280,9 +280,9 @@ function bindEvents() {
         }
 
         showExportDialog({
-            type: 'Spice Set',
+            type: 'Tone Pack',
             name: selectedSetName,
-            filename: `${selectedSetName}.spiceset.json`,
+            filename: `${selectedSetName}.tonepack.json`,
             data: {
                 sapphire_export: true,
                 type: 'spice_set',
@@ -297,15 +297,15 @@ function bindEvents() {
     // Import
     container.querySelector('#ss-import')?.addEventListener('click', () => {
         showImportDialog({
-            type: 'Spice Set',
+            type: 'Tone Pack',
             overwrites: [
-                { key: 'spices', label: 'Overwrite existing categories with imported spices' },
+            { key: 'spices', label: 'Overwrite existing categories with imported cues' },
             ],
             existingNames: spiceSets.map(s => s.name),
             validate: (d) => {
                 if (d.sapphire_export && d.type === 'spice_set' && d.categories) return null;
                 if (d.categories && typeof d.categories === 'object') return null;
-                return 'Invalid spice set format: needs categories';
+            return 'Invalid tone pack format: needs categories';
             },
             getName: (d) => d.name || 'imported',
             onImport: async (data, { name, overwrites }) => {
@@ -414,18 +414,18 @@ async function handleSpiceAction(e) {
 
     try {
         if (action === 'add-spice') {
-            const text = prompt(`Add spice to "${cat}":`);
+            const text = prompt(`Add tone cue to "${cat}":`);
             if (!text?.trim()) return;
             await addSpice(cat, text.trim());
             ui.showToast('Added', 'success');
         } else if (action === 'edit-spice') {
             const current = spiceData.categories[cat]?.spices?.[idx] || '';
-            const text = prompt('Edit spice:', current);
+            const text = prompt('Edit tone cue:', current);
             if (text === null || text === current) return;
             await updateSpice(cat, idx, text);
             ui.showToast('Updated', 'success');
         } else if (action === 'delete-spice') {
-            if (!confirm('Delete this spice?')) return;
+            if (!confirm('Delete this tone cue?')) return;
             await deleteSpice(cat, idx);
             ui.showToast('Deleted', 'success');
         } else if (action === 'rename-cat') {
@@ -434,7 +434,7 @@ async function handleSpiceAction(e) {
             await renameCategory(cat, newName.trim());
             ui.showToast(`Renamed to ${newName.trim()}`, 'success');
         } else if (action === 'delete-cat') {
-            if (!confirm(`Delete category "${cat}" and all its spices?`)) return;
+        if (!confirm(`Delete category "${cat}" and all its tone cues?`)) return;
             await deleteCategory(cat);
             ui.showToast(`Deleted: ${cat}`, 'success');
         } else {

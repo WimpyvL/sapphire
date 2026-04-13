@@ -16,7 +16,7 @@ export default {
         <div class="identity-field">
           <label for="setup-user-name">Your Name</label>
           <input type="text" id="setup-user-name" class="identity-input"
-                 value="${userName}" placeholder="What should Sapphire call you?">
+                value="${userName}" placeholder="What should Sani call you?">
         </div>
         <div class="identity-field" style="margin-top:16px">
           <label>Timezone</label>

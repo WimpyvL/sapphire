@@ -18,6 +18,7 @@ from core.story_engine import STORY_TOOL_NAMES
 from core.stt.stt_null import NullWhisperClient as _NullWhisperClient
 from core.stt.utils import can_transcribe
 from core.wakeword.wakeword_null import NullWakeWordDetector as _NullWakeWordDetector
+from core.identity import history_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -470,10 +471,6 @@ async def get_init_data(request: Request, _=Depends(require_login), system=Depen
         from core.toolsets import toolset_manager
         from core.routes.content import _build_spice_response
         from core.routes.plugins import _get_merged_plugins
-        from core.plugin_loader import plugin_loader
-        def _get_load_errors():
-            try: return plugin_loader.get_load_errors()
-            except Exception: return []
 
         function_manager = system.llm_chat.function_manager
         session_manager = system.llm_chat.session_manager
@@ -621,8 +618,7 @@ async def get_init_data(request: Request, _=Depends(require_login), system=Depen
             },
             "wizard_step": wizard_step,
             "avatars": avatars,
-            "plugins_config": plugins_config,
-            "load_errors": _get_load_errors()
+            "plugins_config": plugins_config
         }
     except Exception as e:
         logger.error(f"Error getting init data: {e}", exc_info=True)
@@ -662,7 +658,7 @@ async def remove_history_messages(request: Request, _=Depends(require_login), sy
             story_enabled = chat_settings.get('story_engine_enabled', False)
             if story_enabled:
                 from core.story_engine import StoryEngine
-                db_path = PROJECT_ROOT / "user" / "history" / "sapphire_history.db"
+                db_path = history_db_path(PROJECT_ROOT / "user" / "history")
                 if db_path.exists() and chat_name:
                     engine = StoryEngine(chat_name, db_path)
                     preset = chat_settings.get('story_preset')

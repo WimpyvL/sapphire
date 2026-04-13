@@ -4,7 +4,7 @@
   "identity": {
     "DEFAULT_USERNAME": "Human Protagonist",
     "AVATARS_IN_CHAT": true,
-    "DEFAULT_PERSONA": "",
+    "DEFAULT_PERSONA": "sani",
     "USER_TIMEZONE": "UTC"
   },
   
@@ -30,7 +30,6 @@
   
   "backups": {
     "BACKUPS_ENABLED": true,
-    "BACKUPS_HOUR": 3,
     "BACKUPS_KEEP_DAILY": 7,
     "BACKUPS_KEEP_WEEKLY": 4,
     "BACKUPS_KEEP_MONTHLY": 3,
@@ -51,7 +50,7 @@
     "WAKE_WORD_ENABLED": false,
     "CHUNK_SIZE": 1280,
     "BUFFER_DURATION": 0.5,
-    "WAKEWORD_MODEL": "hey_sapphire",
+    "WAKEWORD_MODEL": "hey_sani",
     "WAKEWORD_THRESHOLD": 0.60,
     "WAKEWORD_FRAMEWORK": "onnx",
     "WAKE_TONE_DURATION": 0.150,
@@ -116,7 +115,7 @@
 
   "server": {
     "WEB_UI_HOST": "0.0.0.0",
-    "WEB_UI_PORT": 8073,
+    "WEB_UI_PORT": 3004,
     "WEB_UI_SSL_ADHOC": true
   },
   
@@ -125,6 +124,14 @@
     "CONTEXT_LIMIT": 65535,
     "LLM_REQUEST_TIMEOUT": 240.0,
     "LLM_PROVIDERS": {
+      "lmstudio": {
+        "provider": "openai",
+        "display_name": "LM Studio",
+        "base_url": "http://127.0.0.1:1234/v1",
+        "timeout": 0.3,
+        "enabled": true,
+        "use_as_fallback": true
+      },
       "claude": {
         "provider": "claude",
         "display_name": "Claude",
@@ -135,6 +142,16 @@
         "use_as_fallback": true,
         "thinking_enabled": true,
         "thinking_budget": 10000
+      },
+      "fireworks": {
+        "provider": "fireworks",
+        "display_name": "Fireworks",
+        "base_url": "https://api.fireworks.ai/inference/v1",
+        "api_key_env": "FIREWORKS_API_KEY",
+        "model": "accounts/fireworks/models/glm-4p7",
+        "timeout": 10.0,
+        "enabled": false,
+        "use_as_fallback": true
       },
       "openai": {
         "provider": "openai",
@@ -148,6 +165,16 @@
         "reasoning_effort": "medium",
         "reasoning_summary": "detailed"
       },
+      "grok": {
+        "provider": "openai",
+        "display_name": "Grok (xAI)",
+        "base_url": "https://api.x.ai/v1",
+        "api_key_env": "XAI_API_KEY",
+        "model": "grok-4-1-fast-reasoning",
+        "timeout": 10.0,
+        "enabled": false,
+        "use_as_fallback": true
+      },
       "gemini": {
         "provider": "gemini",
         "display_name": "Gemini",
@@ -159,21 +186,40 @@
         "use_as_fallback": true,
         "thinking_enabled": true,
         "reasoning_effort": "medium"
-      }
-    },
-    "LLM_CUSTOM_PROVIDERS": {
-      "lmstudio": {
-        "template": "openai",
-        "display_name": "LM Studio",
-        "base_url": "http://127.0.0.1:1234/v1",
-        "timeout": 0.3,
-        "is_local": true,
-        "auto_discover_models": true,
-        "enabled": true,
+      },
+      "featherless": {
+        "provider": "openai",
+        "display_name": "Featherless",
+        "base_url": "https://api.featherless.ai/v1",
+        "api_key_env": "FEATHERLESS_API_KEY",
+        "model": "deepseek-ai/DeepSeek-V3.2",
+        "timeout": 10.0,
+        "enabled": false,
         "use_as_fallback": true
+      },
+      "other": {
+        "provider": "openai",
+        "display_name": "Other (OpenAI Compatible)",
+        "base_url": "",
+        "model": "",
+        "timeout": 10.0,
+        "enabled": false,
+        "use_as_fallback": true,
+        "generation_params": {}
+      },
+      "responses": {
+        "provider": "responses",
+        "display_name": "Responses API (Generic)",
+        "base_url": "",
+        "model": "",
+        "timeout": 10.0,
+        "enabled": false,
+        "use_as_fallback": true,
+        "reasoning_effort": "medium",
+        "reasoning_summary": "detailed"
       }
     },
-    "LLM_FALLBACK_ORDER": ["lmstudio", "claude", "gemini"],
+    "LLM_FALLBACK_ORDER": ["lmstudio", "claude", "gemini", "fireworks", "featherless", "openai", "other"],
     "MODEL_GENERATION_PROFILES": {
       "_comment": "Balanced generation params per model. Edit values here to tune.",
       "__fallback__": { "temperature": 0.7, "top_p": 0.9, "max_tokens": 4096, "presence_penalty": 0.1, "frequency_penalty": 0.1 },
@@ -203,10 +249,6 @@
       "accounts/fireworks/models/deepseek-v3p2": { "temperature": 0.75, "top_p": 0.9, "max_tokens": 8192, "presence_penalty": 0.1, "frequency_penalty": 0.1 },
       "accounts/fireworks/models/glm-4p7": { "temperature": 0.75, "top_p": 0.9, "max_tokens": 4096, "presence_penalty": 0.1, "frequency_penalty": 0.1 },
       "accounts/fireworks/models/minimax-m2p5": { "temperature": 0.75, "top_p": 0.9, "max_tokens": 4096, "presence_penalty": 0.1, "frequency_penalty": 0.1 },
-
-      "MiniMax-M2.7": { "temperature": 0.7, "top_p": 0.9, "max_tokens": 4096, "presence_penalty": 0.0, "frequency_penalty": 0.0 },
-      "MiniMax-M2.5": { "temperature": 0.7, "top_p": 0.9, "max_tokens": 4096, "presence_penalty": 0.0, "frequency_penalty": 0.0 },
-      "MiniMax-M2.1": { "temperature": 0.7, "top_p": 0.9, "max_tokens": 4096, "presence_penalty": 0.0, "frequency_penalty": 0.0 },
 
       "zai-org/GLM-5": { "temperature": 0.7, "top_p": 0.9, "max_tokens": 8192, "presence_penalty": 0.0, "frequency_penalty": 0.0 },
       "zai-org/GLM-4.7": { "temperature": 0.75, "top_p": 0.9, "max_tokens": 4096, "presence_penalty": 0.0, "frequency_penalty": 0.0 },

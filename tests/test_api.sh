@@ -3,7 +3,7 @@
 # Sapphire Abilities API Test Script
 # Tests all abilities endpoints with authentication
 
-BASE_URL="https://localhost:8073"
+BASE_URL="https://localhost:3004"
 COOKIE_FILE="/tmp/sapphire_test_cookies.txt"
 PASSWORD="changeme"
 

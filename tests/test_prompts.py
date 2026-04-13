@@ -124,7 +124,7 @@ class TestPromptManagerTemplates:
 
                 result = mgr._replace_templates("Hello {ai_name}!")
 
-                assert result == "Hello Sapphire!"
+                assert result == "Hello Sani!"
     
     def test_replace_user_name(self):
         """Should replace {user_name} placeholder."""
@@ -154,7 +154,7 @@ class TestPromptManagerTemplates:
 
                 result = mgr._replace_templates("I am {ai_name}, you are {user_name}")
 
-                assert result == "I am Sapphire, you are testuser"
+                assert result == "I am Sani, you are testuser"
     
     def test_handles_empty_string(self):
         """Should handle empty string."""

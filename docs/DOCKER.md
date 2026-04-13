@@ -59,7 +59,7 @@ docker compose up -d
 
 ### 5. Open the web UI
 
-Go to **https://localhost:8073** in your browser and complete the setup wizard.
+Go to **https://localhost:3004** in your browser and complete the setup wizard.
 
 > **Note**: You'll see a browser security warning about the self-signed certificate. This is normal — click "Advanced" → "Proceed" to continue.
 
@@ -222,4 +222,4 @@ The TTS engine has automatic retry with backoff. If a single message fails, rege
 **Container keeps restarting**
 Check the logs for errors: `docker compose logs --tail 50`. Common causes:
 - Missing API keys (configure in docker-compose.yml or via the web UI)
-- Port 8073 already in use (change the port mapping in docker-compose.yml: `"8074:8073"`)
+- Port 3004 already in use (change the port mapping in docker-compose.yml: `"3005:3004"`)

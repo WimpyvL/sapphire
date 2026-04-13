@@ -1,6 +1,7 @@
 import config
 import logging
 from pathlib import Path
+from core.identity import WAKEWORD_MODEL, LEGACY_WAKEWORD_MODEL
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +98,13 @@ def resolve_model_path(model_name):
     For builtins, returns just the name (OWW handles it).
     For core/custom models, returns the full path.
     """
+    if model_name == WAKEWORD_MODEL:
+        for ext in ['.onnx', '.tflite']:
+            candidate = CORE_MODELS_DIR / f'{WAKEWORD_MODEL}{ext}'
+            if candidate.exists():
+                return str(candidate)
+        model_name = LEGACY_WAKEWORD_MODEL
+
     if model_name in BUILTIN_MODELS:
         return model_name
     

@@ -10,6 +10,7 @@ from fastapi import APIRouter, Request, Depends, HTTPException
 from core.auth import require_login
 from core.api_fastapi import get_system, _apply_chat_settings
 from core.event_bus import publish, Events
+from core.identity import history_db_path
 
 logger = logging.getLogger(__name__)
 
@@ -148,7 +149,7 @@ async def list_story_presets(request: Request, _=Depends(require_login)):
 async def get_chat_state(chat_name: str, request: Request, _=Depends(require_login), system=Depends(get_system)):
     """Get current state for a chat."""
     from core.story_engine import StoryEngine
-    db_path = PROJECT_ROOT / "user" / "history" / "sapphire_history.db"
+    db_path = history_db_path(PROJECT_ROOT / "user" / "history")
     if not db_path.exists():
         raise HTTPException(status_code=404, detail="Database not found")
 
@@ -185,7 +186,7 @@ async def get_chat_state(chat_name: str, request: Request, _=Depends(require_log
 async def get_chat_state_history(chat_name: str, limit: int = 100, key: str = None, request: Request = None, _=Depends(require_login)):
     """Get state change history."""
     from core.story_engine import StoryEngine
-    db_path = PROJECT_ROOT / "user" / "history" / "sapphire_history.db"
+    db_path = history_db_path(PROJECT_ROOT / "user" / "history")
     if not db_path.exists():
         raise HTTPException(status_code=404, detail="Database not found")
     engine = StoryEngine(chat_name, db_path)
@@ -197,7 +198,7 @@ async def get_chat_state_history(chat_name: str, limit: int = 100, key: str = No
 async def reset_chat_state(chat_name: str, request: Request, _=Depends(require_login), system=Depends(get_system)):
     """Reset state."""
     from core.story_engine import StoryEngine
-    db_path = PROJECT_ROOT / "user" / "history" / "sapphire_history.db"
+    db_path = history_db_path(PROJECT_ROOT / "user" / "history")
     if not db_path.exists():
         raise HTTPException(status_code=404, detail="Database not found")
 
@@ -226,7 +227,7 @@ async def reset_chat_state(chat_name: str, request: Request, _=Depends(require_l
 async def set_chat_state_value(chat_name: str, request: Request, _=Depends(require_login), system=Depends(get_system)):
     """Set a state value."""
     from core.story_engine import StoryEngine
-    db_path = PROJECT_ROOT / "user" / "history" / "sapphire_history.db"
+    db_path = history_db_path(PROJECT_ROOT / "user" / "history")
     if not db_path.exists():
         raise HTTPException(status_code=404, detail="Database not found")
 
@@ -281,7 +282,7 @@ async def save_game_state(chat_name: str, request: Request, _=Depends(require_lo
     if not preset_name:
         raise HTTPException(status_code=400, detail="No game preset active")
 
-    db_path = PROJECT_ROOT / "user" / "history" / "sapphire_history.db"
+    db_path = history_db_path(PROJECT_ROOT / "user" / "history")
     engine = StoryEngine(chat_name, db_path)
     state = engine.get_state()
     turn = system.llm_chat.session_manager.get_turn_count() if system else 0
@@ -301,10 +302,8 @@ async def save_game_state(chat_name: str, request: Request, _=Depends(require_lo
     saves_dir = PROJECT_ROOT / "user" / "story_saves" / preset_name
     saves_dir.mkdir(parents=True, exist_ok=True)
     slot_file = saves_dir / f"slot_{slot}.json"
-    tmp_path = slot_file.with_suffix('.tmp')
-    with open(tmp_path, 'w', encoding='utf-8') as f:
+    with open(slot_file, 'w', encoding='utf-8') as f:
         json.dump(save_data, f, indent=2)
-    tmp_path.replace(slot_file)
 
     msg_count = len(messages)
     return {"status": "saved", "slot": slot, "timestamp": save_data["timestamp"], "message_count": msg_count}
@@ -334,7 +333,7 @@ async def load_game_state(chat_name: str, request: Request, _=Depends(require_lo
         save_data = json.load(f)
 
     # Restore story state
-    db_path = PROJECT_ROOT / "user" / "history" / "sapphire_history.db"
+    db_path = history_db_path(PROJECT_ROOT / "user" / "history")
     engine = StoryEngine(chat_name, db_path)
     turn = system.llm_chat.session_manager.get_turn_count() if system else 0
 
@@ -351,9 +350,8 @@ async def load_game_state(chat_name: str, request: Request, _=Depends(require_lo
     saved_messages = save_data.get("messages")
     if saved_messages is not None:
         session_manager = system.llm_chat.session_manager
-        with session_manager._lock:
-            session_manager.current_chat.messages = saved_messages
-            session_manager._save_current_chat()
+        session_manager.current_chat.messages = saved_messages
+        session_manager._save_current_chat()
         logger.info(f"[STORY] Quickloaded slot {slot}: {len(saved_messages)} messages + state restored")
 
     return {"status": "loaded", "slot": slot, "turn": save_data.get("turn", 0), "timestamp": save_data.get("timestamp")}

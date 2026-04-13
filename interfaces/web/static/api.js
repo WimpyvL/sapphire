@@ -1,6 +1,5 @@
 // api.js - Backend communication
 import { fetchWithTimeout } from './shared/fetch.js';
-import { dispatch } from './core/event-bus.js';
 
 export { fetchWithTimeout };
 
@@ -168,13 +167,11 @@ const processSSEData = (data, handlers) => {
 };
 
 export const streamChatContinue = async (text, prefill, onChunk, onComplete, onError, signal = null, onToolStart = null, onToolEnd = null, onStreamStarted = null, onIterationStart = null) => {
-    onChunk = _wrapChunkWithAvatarScan(onChunk);
     let reader = null;
     try {
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
         const res = await fetch('/api/chat/stream', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ text, prefill, skip_user_message: true }),
             signal
         });
@@ -236,58 +233,7 @@ export const streamChatContinue = async (text, prefill, onChunk, onComplete, onE
     }
 };
 
-// Avatar tag scanner — wraps onChunk to detect <<avatar: trackname>> in streamed responses
-// Reads strip_tags setting from avatar plugin state (cached on page load)
-window._avatarStripTags = false;
-fetch('/api/plugin/avatar/config').then(r => {
-    if (!r.ok) { console.warn('[Avatar] Config fetch failed:', r.status); return {}; }
-    return r.json();
-}).then(cfg => {
-    window._avatarStripTags = cfg?.strip_tags ?? false;
-    console.log('[Avatar] strip_tags =', window._avatarStripTags);
-}).catch(e => { console.warn('[Avatar] Config fetch error:', e); });
-
-function _wrapChunkWithAvatarScan(onChunk) {
-    let scanBuf = '';
-    let holdBuf = '';  // text held back while a potential tag is forming
-    const tagRe = /<<avatar:\s*([a-zA-Z0-9_]+)(?:\s+(\d+(?:\.\d+)?s))?>>/g;
-    return (chunk) => {
-        // Scan for complete tags
-        scanBuf += chunk;
-        for (const match of scanBuf.matchAll(tagRe)) {
-            const track = match[1];
-            const duration = match[2] ? parseFloat(match[2]) * 1000 : null;
-            dispatch('avatar_animate', { track, duration });
-        }
-        const lastOpen = scanBuf.lastIndexOf('<<');
-        scanBuf = lastOpen >= 0 && scanBuf.indexOf('>>', lastOpen) < 0 ? scanBuf.slice(lastOpen) : '';
-
-        if (window._avatarStripTags) {
-            // Buffer text to avoid showing partial tags
-            holdBuf += chunk;
-            // Strip complete tags
-            holdBuf = holdBuf.replace(tagRe, '');
-            // Check for a partial tag at the end
-            const partialIdx = holdBuf.lastIndexOf('<<');
-            if (partialIdx >= 0 && holdBuf.indexOf('>>', partialIdx) < 0) {
-                // Partial tag — flush everything before it, hold the rest
-                const safe = holdBuf.slice(0, partialIdx);
-                holdBuf = holdBuf.slice(partialIdx);
-                if (safe) { onChunk(safe); dispatch('chat_chunk', { text: safe }); }
-            } else {
-                // No partial tag — flush all
-                if (holdBuf) { onChunk(holdBuf); dispatch('chat_chunk', { text: holdBuf }); }
-                holdBuf = '';
-            }
-        } else {
-            onChunk(chunk);
-            dispatch('chat_chunk', { text: chunk });
-        }
-    };
-}
-
 export const streamChat = async (text, onChunk, onComplete, onError, signal = null, prefill = null, onToolStart = null, onToolEnd = null, onStreamStarted = null, onIterationStart = null, images = null, files = null) => {
-    onChunk = _wrapChunkWithAvatarScan(onChunk);
     let reader = null;
     try {
         const body = { text };
@@ -295,10 +241,9 @@ export const streamChat = async (text, onChunk, onComplete, onError, signal = nu
         if (images && images.length > 0) body.images = images;
         if (files && files.length > 0) body.files = files;
         
-        const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
         const res = await fetch('/api/chat/stream', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
+            headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(body),
             signal
         });

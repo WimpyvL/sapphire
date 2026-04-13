@@ -1,6 +1,5 @@
 import logging
 import random
-import threading
 from .prompt_manager import prompt_manager
 
 logger = logging.getLogger(__name__)
@@ -11,10 +10,9 @@ SCENARIO_PRESETS = prompt_manager.scenario_presets
 MONOLITHS = prompt_manager.monoliths
 SPICE_POOL = prompt_manager.spices
 
-# Runtime state (not in JSON) — guarded by _state_lock for thread safety
-_state_lock = threading.Lock()
+# Runtime state (not in JSON)
 _assembled_state = {
-    "character": "sapphire",
+    "character": "sani",
     "location": "default",
     "relationship": "friend",
     "goals": "none",
@@ -154,7 +152,7 @@ def reset_to_defaults():
     """Reset to default assembled state."""
     global _assembled_state
     _assembled_state = {
-        "character": "sapphire",
+        "character": "sani",
         "location": "default",
         "relationship": "friend",
         "goals": "none",
@@ -230,33 +228,29 @@ def get_next_spice():
 
 
 def assemble_prompt():
-    """Assemble prompt from pieces. Thread-safe via snapshot."""
+    """Assemble prompt from pieces."""
     components = prompt_manager.components
-
-    # Snapshot mutable state under lock to prevent iteration crash
-    with _state_lock:
-        state = {k: (list(v) if isinstance(v, list) else v) for k, v in _assembled_state.items()}
-
+    
     parts = [
-        components.get("character", {}).get(state["character"], ""),
-        f"You are currently {components.get('location', {}).get(state['location'], '')}.",
-        components.get("relationship", {}).get(state["relationship"], ""),
-        components.get("goals", {}).get(state["goals"], ""),
-        components.get("format", {}).get(state["format"], "")
+        components.get("character", {}).get(_assembled_state["character"], ""),
+        f"You are currently {components.get('location', {}).get(_assembled_state['location'], '')}.",
+        components.get("relationship", {}).get(_assembled_state["relationship"], ""),
+        components.get("goals", {}).get(_assembled_state["goals"], ""),
+        components.get("format", {}).get(_assembled_state["format"], "")
     ]
-
-    if state["scenario"] != "default":
-        scenario_text = components.get("scenario", {}).get(state["scenario"], "")
+    
+    if _assembled_state["scenario"] != "default":
+        scenario_text = components.get("scenario", {}).get(_assembled_state["scenario"], "")
         if scenario_text:
             parts.append(scenario_text)
-
+    
     extras = components.get("extras", {})
-    for extra in state["extras"]:
+    for extra in _assembled_state["extras"]:
         if extra in extras:
             parts.append(extras[extra])
-
+    
     emotions = components.get("emotions", {})
-    for emotion in state["emotions"]:
+    for emotion in _assembled_state["emotions"]:
         if emotion in emotions:
             parts.append(emotions[emotion])
     
@@ -281,31 +275,29 @@ def get_prompt_mode() -> str:
 def set_component(component_type, value):
     """Set a component - only works in assembled mode."""
     global _assembled_state
-
+    
     if not is_assembled_mode():
         return f"Component changes only work in assembled mode. Current mode: {_assembled_state['active_preset']} (monolith)"
-
+    
     components = prompt_manager.components
     if component_type not in components:
         return f"Unknown component: {component_type}"
-
+    
     if component_type in ["extras", "emotions"]:
         if value in components[component_type]:
-            with _state_lock:
-                if value not in _assembled_state[component_type]:
-                    _assembled_state[component_type].append(value)
-                    _assembled_state["active_preset"] = "assembled"
-                    return f"Added {component_type[:-1]}: {value}"
+            if value not in _assembled_state[component_type]:
+                _assembled_state[component_type].append(value)
+                _assembled_state["active_preset"] = "assembled"
+                return f"Added {component_type[:-1]}: {value}"
             return f"{component_type[:-1].title()} '{value}' already active"
         available = list(components[component_type].keys())
         return f"Unknown {component_type[:-1]}: {value}. Available: {', '.join(available)}"
-
-    with _state_lock:
-        if value in components[component_type]:
-            _assembled_state[component_type] = value
-            _assembled_state["active_preset"] = "assembled"
-            return f"Set {component_type}: {value}"
-
+    
+    if value in components[component_type]:
+        _assembled_state[component_type] = value
+        _assembled_state["active_preset"] = "assembled"
+        return f"Set {component_type}: {value}"
+    
     available = list(components[component_type].keys())
     return f"Unknown {component_type}: {value}. Available: {', '.join(available)}"
 
@@ -315,12 +307,11 @@ def remove_extra(value):
     global _assembled_state
     if not is_assembled_mode():
         return f"Component changes only work in assembled mode"
-
-    with _state_lock:
-        if value in _assembled_state["extras"]:
-            _assembled_state["extras"].remove(value)
-            _assembled_state["active_preset"] = "assembled"
-            return f"Removed extra: {value}"
+    
+    if value in _assembled_state["extras"]:
+        _assembled_state["extras"].remove(value)
+        _assembled_state["active_preset"] = "assembled"
+        return f"Removed extra: {value}"
     return f"Extra '{value}' not active"
 
 
@@ -329,12 +320,11 @@ def remove_emotion(value):
     global _assembled_state
     if not is_assembled_mode():
         return f"Component changes only work in assembled mode"
-
-    with _state_lock:
-        if value in _assembled_state["emotions"]:
-            _assembled_state["emotions"].remove(value)
-            _assembled_state["active_preset"] = "assembled"
-            return f"Removed emotion: {value}"
+    
+    if value in _assembled_state["emotions"]:
+        _assembled_state["emotions"].remove(value)
+        _assembled_state["active_preset"] = "assembled"
+        return f"Removed emotion: {value}"
     return f"Emotion '{value}' not active"
 
 
@@ -343,11 +333,10 @@ def clear_extras():
     global _assembled_state
     if not is_assembled_mode():
         return f"Component changes only work in assembled mode"
-
-    with _state_lock:
-        count = len(_assembled_state["extras"])
-        _assembled_state["extras"] = []
-        _assembled_state["active_preset"] = "assembled"
+    
+    count = len(_assembled_state["extras"])
+    _assembled_state["extras"] = []
+    _assembled_state["active_preset"] = "assembled"
     return f"Cleared {count} extras"
 
 

@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Solara">
+  <rect width="100" height="100" rx="24" fill="#f4f1e8"/>
+  <circle cx="50" cy="50" r="28" fill="#ffffff" stroke="#141414" stroke-width="4"/>
+  <path d="M33 68c4 5 10 8 17 8 10 0 17-4 17-11 0-8-8-10-16-12-9-2-18-5-18-16 0-10 8-17 21-17 8 0 15 2 20 6l-5 8c-5-3-10-5-16-5-7 0-11 3-11 8 0 5 4 7 13 9 11 2 21 6 21 19 0 12-10 20-27 20-10 0-18-3-24-9l8-8z" fill="#141414"/>
+  <g stroke="#141414" stroke-width="4" stroke-linecap="round">
+    <path d="M50 10v10"/>
+    <path d="M50 80v10"/>
+    <path d="M10 50h10"/>
+    <path d="M80 50h10"/>
+  </g>
+</svg>

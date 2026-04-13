@@ -12,6 +12,7 @@ from datetime import datetime
 from typing import Dict, Any, Optional, Tuple, List
 
 import config
+from core.identity import PRODUCT_NAME, DEFAULT_PROMPT
 from core.chat.llm_providers import get_provider_by_key, get_first_available_provider, get_generation_params
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,7 @@ class ExecutionContext:
 
     def _build_prompt(self) -> str:
         """Build system prompt from task settings. No global mutation."""
-        prompt_name = self.task_settings.get("prompt", "sapphire")
+        prompt_name = self.task_settings.get("prompt", DEFAULT_PROMPT)
         from core import prompts
 
         prompt_data = prompts.get_prompt(prompt_name)
@@ -53,7 +54,7 @@ class ExecutionContext:
 
         # Name substitutions
         username = getattr(config, 'DEFAULT_USERNAME', 'Human')
-        ai_name = 'Sapphire'
+        ai_name = PRODUCT_NAME
         system_prompt = system_prompt.replace("{user_name}", username).replace("{ai_name}", ai_name)
 
         # Datetime injection
@@ -128,7 +129,7 @@ class ExecutionContext:
         provider_key = self.task_settings.get("provider", "auto")
         model_override = self.task_settings.get("model", "")
 
-        providers_config = {**getattr(config, 'LLM_PROVIDERS', {}), **getattr(config, 'LLM_CUSTOM_PROVIDERS', {})}
+        providers_config = getattr(config, 'LLM_PROVIDERS', {})
 
         if provider_key and provider_key not in ("auto", ""):
             provider = get_provider_by_key(
@@ -156,7 +157,7 @@ class ExecutionContext:
         effective_model = self.model_override if self.model_override else self.provider.model
         params = get_generation_params(
             self.provider_key, effective_model,
-            {**getattr(config, 'LLM_PROVIDERS', {}), **getattr(config, 'LLM_CUSTOM_PROVIDERS', {})}
+            getattr(config, 'LLM_PROVIDERS', {})
         )
         if self.model_override:
             params['model'] = self.model_override

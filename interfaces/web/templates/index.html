@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <title>Sapphire</title>
+    <title>Sani</title>
     <link rel="icon" type="image/x-icon" href="/static/favicon.ico">
     <link rel="stylesheet" href="/static/shared.css?v={{ v }}">
 
@@ -18,55 +18,20 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="Sapphire">
+    <meta name="apple-mobile-web-app-title" content="Sani">
     <link rel="apple-touch-icon" href="/static/icons/icon-192.png">
 
     <script>
         // Load saved theme before CSS renders to prevent flash
         (function() {
-            const saved = localStorage.getItem('sapphire-theme') || 'dark';
+            const saved = localStorage.getItem('sani-theme') || localStorage.getItem('sapphire-theme') || 'dark';
             document.documentElement.setAttribute('data-theme', saved);
-
-            // Check if this is a plugin theme (has saved theme data with CSS URL)
-            var themeDataStr = localStorage.getItem('sapphire-theme-data');
-            var themeData = null;
-            try { themeData = themeDataStr ? JSON.parse(themeDataStr) : null; } catch(e) {}
-
-            if (themeData && themeData.id === saved && themeData.css) {
-                // Plugin theme — load from plugin CSS URL
-                var link = document.createElement('link');
-                link.id = 'plugin-theme-css';
-                link.rel = 'stylesheet';
-                link.href = themeData.css;
-                document.head.appendChild(link);
-                // Also load scripts if any
-                if (themeData.scripts) {
-                    themeData.scripts.forEach(function(src) {
-                        var s = document.createElement('script');
-                        s.src = src;
-                        s.dataset.themeScript = saved;
-                        document.head.appendChild(s);
-                    });
-                }
-            } else {
-                // Core theme — load from static/themes/
-                var link = document.createElement('link');
-                link.id = 'theme-stylesheet';
-                link.rel = 'stylesheet';
-                link.href = '/static/themes/' + saved + '.css?v={{ v }}';
-                document.head.appendChild(link);
-            }
-
-            // Restore chat-style data attributes from localStorage
-            try {
-                for (var i = 0; i < localStorage.length; i++) {
-                    var key = localStorage.key(i);
-                    if (key && key.endsWith('-chat-style')) {
-                        var prefix = key.replace('-chat-style', '');
-                        document.documentElement.setAttribute('data-' + prefix + '-chat', localStorage.getItem(key));
-                    }
-                }
-            } catch(e) {}
+            // Load theme CSS file
+            const link = document.createElement('link');
+            link.id = 'theme-stylesheet';
+            link.rel = 'stylesheet';
+            link.href = '/static/themes/' + saved + '.css?v={{ v }}';
+            document.head.appendChild(link);
         })();
     </script>
     <script>
@@ -90,7 +55,7 @@
          NAV RAIL (left, 64px desktop / bottom bar mobile)
          ================================================================ -->
     <nav id="nav-rail">
-        <div class="nav-logo" title="Sapphire">S</div>
+        <div class="nav-logo" title="Sani">S</div>
 
         <button class="nav-item active" data-view="chat">
             <span class="nav-icon">&#x1F4AC;</span>
@@ -103,7 +68,7 @@
                 <div class="nav-flyout-item" data-view="personas" role="button" tabindex="0">&#x1F3AD; Personas</div>
                 <div class="nav-flyout-item" data-view="prompts" role="button" tabindex="0">&#x1F464; Prompts</div>
                 <div class="nav-flyout-item" data-view="toolsets" role="button" tabindex="0">&#x1F527; Toolsets</div>
-                <div class="nav-flyout-item" data-view="spices" role="button" tabindex="0">&#x1F336;&#xFE0F; Spices</div>
+                <div class="nav-flyout-item" data-view="spices" role="button" tabindex="0">&#x1F3A8; Tone Packs</div>
             </div>
         </div>
         <button class="nav-item" data-view="schedule">
@@ -114,17 +79,13 @@
             <span class="nav-icon">&#x1F9E0;</span>
             <span class="nav-label">Mind</span>
         </button>
-        <div class="nav-item nav-group-parent" data-view="settings" role="button" tabindex="0">
+        <button class="nav-item" data-view="settings">
             <span class="nav-icon">&#x2699;&#xFE0F;</span>
             <span class="nav-label">Settings</span>
-            <div class="nav-flyout">
-                <div class="nav-flyout-item" data-view="settings" role="button" tabindex="0">&#x2699;&#xFE0F; Settings</div>
-                <div class="nav-flyout-item" data-view="help" role="button" tabindex="0">&#x1F4D6; Help</div>
-            </div>
-        </div>
-        <button class="nav-item" data-view="apps" id="nav-apps" style="display:none">
-            <span class="nav-icon">&#x1F4E6;</span>
-            <span class="nav-label">Apps</span>
+        </button>
+        <button class="nav-item" data-view="help">
+            <span class="nav-icon">&#x1F4D6;</span>
+            <span class="nav-label">Help</span>
         </button>
 
         <div class="nav-spacer"></div>
@@ -237,7 +198,7 @@
                             <div class="sb-field">
                                 <label for="sb-prompt">prompt</label>
                                 <div class="sb-field-row">
-                                    <select id="sb-prompt"><option value="sapphire">Sapphire</option></select>
+                                    <select id="sb-prompt"><option value="sani">Sani</option></select>
                                     <button type="button" class="sb-btn-sm sb-goto-view" data-view="prompts" data-select="sb-prompt" title="Open in Prompts">&#x2197;</button>
                                 </div>
                             </div>
@@ -249,10 +210,10 @@
                                 </div>
                             </div>
                             <div class="sb-field">
-                                <label for="sb-spice-set">spice set</label>
+                                <label for="sb-spice-set">tone pack</label>
                                 <div class="sb-field-row">
                                     <select id="sb-spice-set"><option value="default">default</option></select>
-                                    <button type="button" class="sb-btn-sm sb-goto-view" data-view="spices" data-select="sb-spice-set" title="Open in Spices">&#x2197;</button>
+                                    <button type="button" class="sb-btn-sm sb-goto-view" data-view="spices" data-select="sb-spice-set" title="Open in Tone Packs">&#x2197;</button>
                                 </div>
                             </div>
                             <div class="sb-field">
@@ -271,7 +232,7 @@
 
                         <!-- Quick toggles -->
                         <div class="sb-toggles">
-                            <button type="button" class="sb-toggle active" id="sb-spice-toggle" data-active="true">Spice &middot; 3</button>
+                            <button type="button" class="sb-toggle active" id="sb-spice-toggle" data-active="true">Tone &middot; 3</button>
                             <button type="button" class="sb-toggle" id="sb-datetime-toggle" data-active="false">Date/Time</button>
                         </div>
 
@@ -398,7 +359,7 @@
                             </div>
                             <div class="sidebar-accordion-content" style="display:none">
                                 <div class="sb-field">
-                                    <label for="sb-spice-turns">spice turns</label>
+                                    <label for="sb-spice-turns">tone interval</label>
                                     <input type="number" id="sb-spice-turns" min="1" max="20" value="3">
                                 </div>
                                 <div class="sb-field sb-field-stack">
@@ -434,9 +395,6 @@
                                 </div>
                             </div>
                         </div>
-
-                        <!-- Plugin-registered accordions (injected by JS) -->
-                        <div id="sb-plugin-accordions"></div>
 
                         <!-- Save As New Persona -->
                         <div class="sidebar-section sb-footer">
@@ -476,8 +434,8 @@
         </div>
         <div id="view-spices" class="view" style="display:none">
             <div class="view-placeholder">
-                <h2>Spices</h2>
-                <p>Spice manager - coming next</p>
+                <h2>Tone Packs</h2>
+                <p>Tone pack manager - coming next</p>
             </div>
         </div>
         <div id="view-schedule" class="view" style="display:none">
@@ -496,12 +454,6 @@
             <div class="view-placeholder">
                 <h2>Settings</h2>
                 <p>System settings - coming next</p>
-            </div>
-        </div>
-        <div id="view-apps" class="view" style="display:none">
-            <div class="view-placeholder">
-                <h2>Apps</h2>
-                <p>Loading apps...</p>
             </div>
         </div>
         <div id="view-help" class="view" style="display:none">
@@ -577,7 +529,7 @@
                 </div>
                 <div class="up-field">
                     <label for="up-username">Your Name</label>
-                    <input type="text" id="up-username" placeholder="What should Sapphire call you?">
+                    <input type="text" id="up-username" placeholder="What should Sani call you?">
                 </div>
                 <div class="up-divider"></div>
                 <div class="up-field">

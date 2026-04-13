@@ -88,7 +88,7 @@ export default {
                     if (a.components) parts.push(`${a.components} components`);
                     if (a.presets) parts.push(`${a.presets} presets`);
                     if (a.monoliths) parts.push(`${a.monoliths} monoliths`);
-                    if (a.spice_categories) parts.push(`${a.spice_categories} spice categories`);
+                    if (a.spice_categories) parts.push(`${a.spice_categories} tone categories`);
                     if (a.personas) parts.push(`${a.personas} personas`);
                     ui.showToast(`Added ${parts.join(', ')}`, 'success');
                 }

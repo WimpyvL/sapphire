@@ -65,7 +65,7 @@ Set any retention value to `0` to disable that tier.
 Create a backup anytime from Settings > Plugins > Backup, or via API:
 
 ```bash
-curl -X POST https://localhost:8073/api/backup/create \
+curl -X POST https://localhost:3004/api/backup/create \
   -H "Content-Type: application/json" \
   -d '{"type": "manual"}'
 ```

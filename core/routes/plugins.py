@@ -19,10 +19,6 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-# Per-plugin toggle locks to prevent double-click races
-_toggle_locks: dict[str, threading.Lock] = {}
-_toggle_locks_guard = threading.Lock()
-
 PROJECT_ROOT = Path(__file__).parent.parent.parent
 STATIC_DIR = PROJECT_ROOT / "interfaces" / "web" / "static"
 
@@ -39,7 +35,7 @@ def _get_merged_plugins():
     """Merge static and user plugins.json."""
     static_plugins_json = STATIC_DIR / 'core-ui' / 'plugins.json'
     try:
-        with open(static_plugins_json, encoding='utf-8') as f:
+        with open(static_plugins_json) as f:
             static = json.load(f)
     except Exception:
         static = {"enabled": [], "plugins": {}}
@@ -48,7 +44,7 @@ def _get_merged_plugins():
         return static
 
     try:
-        with open(USER_PLUGINS_JSON, encoding='utf-8') as f:
+        with open(USER_PLUGINS_JSON) as f:
             user = json.load(f)
     except Exception:
         return static
@@ -97,13 +93,7 @@ async def list_plugins(request: Request, _=Depends(require_login)):
                 has_web = (Path(plugin_dir) / "web" / "index.js").exists() if plugin_dir else False
                 has_script = (Path(plugin_dir) / "web" / "main.js").exists() if plugin_dir else False
                 settings_schema = manifest.get("capabilities", {}).get("settings")
-                # Respect manifest settingsUI — null means no separate settings page
-                manifest_ui = manifest.get("settingsUI", "auto")
-                if manifest_ui is None or manifest_ui == "none":
-                    settings_ui = None
-                elif manifest_ui in ("plugin", "manifest", "core"):
-                    settings_ui = manifest_ui
-                elif has_web:
+                if has_web:
                     settings_ui = "plugin"
                 elif settings_schema:
                     settings_ui = "manifest"
@@ -128,8 +118,6 @@ async def list_plugins(request: Request, _=Depends(require_login)):
                     "icon": manifest.get("icon"),
                     "band": info.get("band"),
                     "has_script": has_script,
-                    "sidebar_accordion": manifest.get("capabilities", {}).get("sidebar_accordion"),
-                    "missing_deps": info.get("missing_deps", []),
                 })
     except Exception:
         pass
@@ -143,240 +131,95 @@ async def toggle_plugin(plugin_name: str, request: Request, _=Depends(require_lo
     if plugin_name in LOCKED_PLUGINS:
         raise HTTPException(status_code=403, detail=f"Cannot disable locked plugin: {plugin_name}")
 
-    # Per-plugin lock prevents double-click races
-    with _toggle_locks_guard:
-        if plugin_name not in _toggle_locks:
-            _toggle_locks[plugin_name] = threading.Lock()
-        lock = _toggle_locks[plugin_name]
-    if not lock.acquire(blocking=False):
-        return {"status": "success", "plugin": plugin_name, "enabled": None, "reload_required": False, "note": "toggle already in progress"}
-
+    merged = _get_merged_plugins()
+    # Accept both static (plugins.json) and backend (plugin_loader) plugins
+    known = set(merged.get("plugins", {}).keys())
     try:
-        merged = _get_merged_plugins()
-        # Accept both static (plugins.json) and backend (plugin_loader) plugins
-        known = set(merged.get("plugins", {}).keys())
-        try:
-            from core.plugin_loader import plugin_loader
-            known.update(info["name"] for info in plugin_loader.get_all_plugin_info())
-        except Exception:
-            pass
-        if plugin_name not in known:
-            raise HTTPException(status_code=404, detail=f"Unknown plugin: {plugin_name}")
-
-        enabled = list(merged.get("enabled", []))
-
-        # Determine current state from plugin_loader (handles default_enabled plugins
-        # that aren't in the persisted enabled list)
-        currently_enabled = plugin_name in enabled
-        try:
-            from core.plugin_loader import plugin_loader as _pl
-            info = _pl.get_plugin_info(plugin_name)
-            if info:
-                currently_enabled = info["enabled"]
-        except Exception:
-            pass
-
-        if currently_enabled:
-            if plugin_name in enabled:
-                enabled.remove(plugin_name)
-            new_state = False
-        else:
-            if plugin_name not in enabled:
-                enabled.append(plugin_name)
-            new_state = True
-
-        USER_WEBUI_DIR.mkdir(parents=True, exist_ok=True)
-        user_data = {}
-        if USER_PLUGINS_JSON.exists():
-            try:
-                with open(USER_PLUGINS_JSON, encoding='utf-8') as f:
-                    user_data = json.load(f)
-            except Exception:
-                pass
-        user_data["enabled"] = enabled
-        tmp_path = USER_PLUGINS_JSON.with_suffix('.tmp')
-        with open(tmp_path, 'w', encoding='utf-8') as f:
-            json.dump(user_data, f, indent=2)
-        tmp_path.replace(USER_PLUGINS_JSON)
-
-        # Live load/unload — no restart needed for backend plugins
-        reload_required = True
-        try:
-            from core.plugin_loader import plugin_loader
-            if plugin_name in plugin_loader._plugins:
-                # Acquire reload lock to serialize against file watcher / reload API
-                with plugin_loader._get_reload_lock(plugin_name):
-                    if new_state:
-                        with plugin_loader._lock:
-                            plugin_loader._plugins[plugin_name]["enabled"] = True
-                        loaded = plugin_loader._load_plugin(plugin_name)
-                        if not loaded:
-                            # Blocked by verification — revert enabled list
-                            with plugin_loader._lock:
-                                plugin_loader._plugins[plugin_name]["enabled"] = False
-                            if plugin_name in enabled:
-                                enabled.remove(plugin_name)
-                            user_data["enabled"] = enabled
-                            tmp_path = USER_PLUGINS_JSON.with_suffix('.tmp')
-                            with open(tmp_path, 'w', encoding='utf-8') as f:
-                                json.dump(user_data, f, indent=2)
-                            tmp_path.replace(USER_PLUGINS_JSON)
-                            with plugin_loader._lock:
-                                verify_msg = plugin_loader._plugins[plugin_name].get("verify_msg", "unknown")
-                            if "unsigned" in verify_msg:
-                                detail = "Unsigned plugin — enable 'Allow Unsigned Plugins' first"
-                            elif "hash mismatch" in verify_msg or "tamper" in verify_msg.lower():
-                                detail = "Plugin signature is invalid — files were modified after signing"
-                            else:
-                                detail = f"Plugin blocked: {verify_msg}"
-                            raise HTTPException(status_code=403, detail=detail)
-                    else:
-                        plugin_loader.unload_plugin(plugin_name)
-                        with plugin_loader._lock:
-                            plugin_loader._plugins[plugin_name]["enabled"] = False
-                reload_required = False
-
-                # Re-sync toolset so enabled functions reflect the plugin change
-                try:
-                    system = get_system()
-                    if system and hasattr(system, 'llm_chat'):
-                        toolset_info = system.llm_chat.function_manager.get_current_toolset_info()
-                        toolset_name = toolset_info.get("name", "custom")
-                        system.llm_chat.function_manager.update_enabled_functions([toolset_name])
-                        from core.event_bus import publish, Events
-                        publish(Events.TOOLSET_CHANGED, {
-                            "name": toolset_name,
-                            "action": "plugin_toggle",
-                            "function_count": toolset_info.get("function_count", 0)
-                        })
-                except Exception:
-                    pass  # Best-effort; tools will sync on next chat
-        except HTTPException:
-            raise
-        except Exception as e:
-            logger.warning(f"Live plugin toggle failed for {plugin_name}: {e}")
-
-        # Check for missing deps after toggle-on
-        missing_deps = []
-        if new_state:
-            try:
-                from core.plugin_loader import plugin_loader
-                p_info = plugin_loader.get_plugin_info(plugin_name)
-                if p_info:
-                    missing_deps = p_info.get("missing_deps", [])
-            except Exception:
-                pass
-
-        return {"status": "success", "plugin": plugin_name, "enabled": new_state,
-                "reload_required": reload_required, "missing_deps": missing_deps}
-    finally:
-        lock.release()
-
-
-@router.get("/api/apps")
-async def list_apps(_=Depends(require_login)):
-    """List available plugin apps (plugins with an app/ directory)."""
-    from core.plugin_loader import plugin_loader
-    apps = []
-    for name, info in plugin_loader._plugins.items():
-        if not info.get("loaded"):
-            continue
-        manifest = info.get("manifest", {})
-        app_config = manifest.get("capabilities", {}).get("app")
-        if not app_config:
-            # Also check for app/ dir even without manifest declaration
-            app_dir = Path(info["path"]) / "app"
-            if not app_dir.exists():
-                continue
-            app_config = {}
-        apps.append({
-            "name": name,
-            "label": app_config.get("label", manifest.get("display_name", name)),
-            "icon": app_config.get("icon", manifest.get("emoji", "")),
-            "description": app_config.get("description", manifest.get("description", "")),
-            "nav": app_config.get("nav", False),
-        })
-    return {"apps": apps}
-
-
-@router.get("/api/themes")
-async def list_themes(_=Depends(require_login)):
-    """List all available themes — core + plugin manifest themes."""
-    themes = []
-
-    # 1. Core themes (static/themes/)
-    themes_dir = PROJECT_ROOT / "interfaces" / "web" / "static" / "themes"
-    themes_json = themes_dir / "themes.json"
-    core_names = []
-    if themes_json.exists():
-        try:
-            data = json.loads(themes_json.read_text(encoding='utf-8'))
-            core_names = data.get("themes", [])
-        except Exception:
-            pass
-
-    for name in core_names:
-        css_path = themes_dir / f"{name}.css"
-        preview = _extract_css_preview(css_path) if css_path.exists() else {}
-        themes.append({
-            "id": name,
-            "name": name.replace('-', ' ').replace('_', ' ').title(),
-            "source": "core",
-            "css": f"/static/themes/{name}.css",
-            "scripts": [],
-            "preview": preview,
-        })
-
-    # 2. Plugin manifest themes (capabilities.themes)
-    from core.plugin_loader import plugin_loader
-    for pname, info in plugin_loader._plugins.items():
-        if not info.get("loaded"):
-            continue
-        manifest = info.get("manifest", {})
-        theme_defs = manifest.get("capabilities", {}).get("themes", [])
-        for td in theme_defs:
-            tid = td.get("id", "")
-            if not tid:
-                continue
-            css_path = td.get("css", "")
-            scripts = td.get("scripts", [])
-            # Resolve paths relative to plugin web serving
-            css_url = f"/plugin-web/{pname}/{css_path}" if css_path else ""
-            script_urls = [f"/plugin-web/{pname}/{s}" for s in scripts]
-            themes.append({
-                "id": f"plugin-{pname}-{tid}",
-                "name": td.get("name", tid.title()),
-                "icon": td.get("icon", ""),
-                "description": td.get("description", ""),
-                "source": "plugin",
-                "plugin": pname,
-                "css": css_url,
-                "scripts": script_urls,
-                "preview": td.get("preview", {}),
-                "settings": td.get("settings", []),
-            })
-
-    return {"themes": themes}
-
-
-def _extract_css_preview(css_path):
-    """Parse key CSS variables from a theme file for preview swatches."""
-    try:
-        text = css_path.read_text(encoding='utf-8')
-        import re
-        colors = {}
-        for var, key in [('--bg:', 'bg'), ('--bg-secondary:', 'bg2'),
-                         ('--text:', 'text'), ('--trim:', 'trim'),
-                         ('--accent:', 'accent'), ('--border:', 'border')]:
-            m = re.search(rf'{re.escape(var)}\s*(#[0-9a-fA-F]{{3,8}}|rgba?\([^)]+\))', text)
-            if m:
-                colors[key] = m.group(1).strip().rstrip(';')
-        # Fallback accent to trim if not found
-        if 'trim' in colors and 'accent' not in colors:
-            colors['accent'] = colors['trim']
-        return colors
+        from core.plugin_loader import plugin_loader
+        known.update(info["name"] for info in plugin_loader.get_all_plugin_info())
     except Exception:
-        return {}
+        pass
+    if plugin_name not in known:
+        raise HTTPException(status_code=404, detail=f"Unknown plugin: {plugin_name}")
+
+    enabled = list(merged.get("enabled", []))
+
+    # Determine current state from plugin_loader (handles default_enabled plugins
+    # that aren't in the persisted enabled list)
+    currently_enabled = plugin_name in enabled
+    try:
+        from core.plugin_loader import plugin_loader as _pl
+        info = _pl.get_plugin_info(plugin_name)
+        if info:
+            currently_enabled = info["enabled"]
+    except Exception:
+        pass
+
+    if currently_enabled:
+        if plugin_name in enabled:
+            enabled.remove(plugin_name)
+        new_state = False
+    else:
+        if plugin_name not in enabled:
+            enabled.append(plugin_name)
+        new_state = True
+
+    USER_WEBUI_DIR.mkdir(parents=True, exist_ok=True)
+    user_data = {}
+    if USER_PLUGINS_JSON.exists():
+        try:
+            with open(USER_PLUGINS_JSON) as f:
+                user_data = json.load(f)
+        except Exception:
+            pass
+    user_data["enabled"] = enabled
+    with open(USER_PLUGINS_JSON, 'w') as f:
+        json.dump(user_data, f, indent=2)
+
+    # Live load/unload — no restart needed for backend plugins
+    reload_required = True
+    try:
+        from core.plugin_loader import plugin_loader
+        if plugin_name in plugin_loader._plugins:
+            if new_state:
+                plugin_loader._plugins[plugin_name]["enabled"] = True
+                loaded = plugin_loader._load_plugin(plugin_name)
+                if not loaded:
+                    # Blocked by verification — revert enabled list
+                    plugin_loader._plugins[plugin_name]["enabled"] = False
+                    if plugin_name in enabled:
+                        enabled.remove(plugin_name)
+                    user_data["enabled"] = enabled
+                    with open(USER_PLUGINS_JSON, 'w') as f:
+                        json.dump(user_data, f, indent=2)
+                    verify_msg = plugin_loader._plugins[plugin_name].get("verify_msg", "unknown")
+                    if "unsigned" in verify_msg:
+                        detail = "Unsigned plugin — enable 'Allow Unsigned Plugins' first"
+                    elif "hash mismatch" in verify_msg or "tamper" in verify_msg.lower():
+                        detail = "Plugin signature is invalid — files were modified after signing"
+                    else:
+                        detail = f"Plugin blocked: {verify_msg}"
+                    raise HTTPException(status_code=403, detail=detail)
+            else:
+                plugin_loader.unload_plugin(plugin_name)
+                plugin_loader._plugins[plugin_name]["enabled"] = False
+            reload_required = False
+
+            # Re-sync toolset so enabled functions reflect the plugin change
+            try:
+                system = get_system()
+                if system and hasattr(system, 'llm_chat'):
+                    toolset_info = system.llm_chat.function_manager.get_current_toolset_info()
+                    toolset_name = toolset_info.get("name", "custom")
+                    system.llm_chat.function_manager.update_enabled_functions([toolset_name])
+            except Exception:
+                pass  # Best-effort; tools will sync on next chat
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"Live plugin toggle failed for {plugin_name}: {e}")
+
+    return {"status": "success", "plugin": plugin_name, "enabled": new_state, "reload_required": reload_required}
 
 
 @router.post("/api/plugins/rescan")
@@ -430,7 +273,7 @@ async def install_plugin(
     if not url and not file:
         raise HTTPException(status_code=400, detail="Provide a GitHub URL or zip file")
 
-    from core.plugin_loader import plugin_loader, USER_PLUGINS_DIR
+    from core.plugin_loader import plugin_loader, PluginState, USER_PLUGINS_DIR
 
     tmp_zip = None
     tmp_dir = None
@@ -453,10 +296,9 @@ async def install_plugin(
             content_length = int(r.headers.get("Content-Length", 0))
             if content_length > MAX_ZIP_SIZE:
                 raise HTTPException(status_code=400, detail=f"Zip too large ({content_length // 1024 // 1024}MB, max 50MB)")
-            fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-            tmp_zip = Path(tmp_path)
+            tmp_zip = Path(tempfile.mktemp(suffix=".zip"))
             downloaded = 0
-            with os.fdopen(fd, "wb") as f:
+            with open(tmp_zip, "wb") as f:
                 for chunk in r.iter_content(8192):
                     downloaded += len(chunk)
                     if downloaded > MAX_ZIP_SIZE:
@@ -464,9 +306,7 @@ async def install_plugin(
                     f.write(chunk)
         else:
             # File upload
-            fd, tmp_path = tempfile.mkstemp(suffix=".zip")
-            os.close(fd)
-            tmp_zip = Path(tmp_path)
+            tmp_zip = Path(tempfile.mktemp(suffix=".zip"))
             content = await file.read()
             if len(content) > MAX_ZIP_SIZE:
                 raise HTTPException(status_code=400, detail=f"Zip too large ({len(content) // 1024 // 1024}MB, max 50MB)")
@@ -532,9 +372,6 @@ async def install_plugin(
         # Block core functions
         if (PROJECT_ROOT / "functions" / f"{name}.py").exists():
             raise HTTPException(status_code=409, detail=f"'{name}' conflicts with a core function")
-        # Block core-ui plugins
-        if (PROJECT_ROOT / "interfaces" / "web" / "static" / "core-ui" / name).exists():
-            raise HTTPException(status_code=409, detail=f"'{name}' conflicts with a core UI plugin")
 
         # ── Size checks on extracted content ──
         total_size = 0
@@ -594,7 +431,7 @@ async def install_plugin(
 
         # ── Write install metadata to plugin state ──
         from datetime import datetime
-        state = plugin_loader.get_plugin_state(name)
+        state = PluginState(name)
         if url:
             state.save("installed_from", url.strip())
             state.save("install_method", "github_url")
@@ -612,16 +449,6 @@ async def install_plugin(
             current = fm.current_toolset_name
             if current:
                 fm.update_enabled_functions([current])
-            try:
-                from core.event_bus import publish, Events
-                toolset_info = fm.get_current_toolset_info()
-                publish(Events.TOOLSET_CHANGED, {
-                    "name": current or "custom",
-                    "action": "plugin_install",
-                    "function_count": toolset_info.get("function_count", 0)
-                })
-            except Exception:
-                pass
 
         return {
             "status": "ok",
@@ -657,23 +484,6 @@ async def uninstall_plugin_endpoint(plugin_name: str, _=Depends(require_login)):
         raise HTTPException(status_code=403, detail="Cannot uninstall system plugins")
     try:
         plugin_loader.uninstall_plugin(plugin_name)
-        # Sync toolset and notify frontend
-        try:
-            system = get_system()
-            if system and system.llm_chat:
-                fm = system.llm_chat.function_manager
-                current = fm.current_toolset_name
-                if current:
-                    fm.update_enabled_functions([current])
-                from core.event_bus import publish, Events
-                toolset_info = fm.get_current_toolset_info()
-                publish(Events.TOOLSET_CHANGED, {
-                    "name": current or "custom",
-                    "action": "plugin_uninstall",
-                    "function_count": toolset_info.get("function_count", 0)
-                })
-        except Exception:
-            pass
         return {"status": "ok", "plugin": plugin_name}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -683,13 +493,13 @@ async def uninstall_plugin_endpoint(plugin_name: str, _=Depends(require_login)):
 async def check_plugin_update(plugin_name: str, _=Depends(require_login)):
     """Check if a newer version is available on GitHub."""
     import re
-    from core.plugin_loader import plugin_loader
+    from core.plugin_loader import plugin_loader, PluginState
 
     info = plugin_loader.get_plugin_info(plugin_name)
     if not info:
         raise HTTPException(status_code=404, detail=f"Unknown plugin: {plugin_name}")
 
-    state = plugin_loader.get_plugin_state(plugin_name)
+    state = PluginState(plugin_name)
     source_url = state.get("installed_from")
     if not source_url or "github.com" not in source_url:
         return {"update_available": False, "reason": "no_source"}
@@ -721,122 +531,12 @@ async def check_plugin_update(plugin_name: str, _=Depends(require_login)):
     remote_version = remote_manifest.get("version", "0.0.0")
     remote_author = remote_manifest.get("author", "unknown")
 
-    def _ver_tuple(v):
-        """Parse version string into comparable tuple (e.g. '1.2.3' → (1, 2, 3))."""
-        try:
-            return tuple(int(x) for x in v.split('.'))
-        except (ValueError, AttributeError):
-            return (0,)
-
-    update = _ver_tuple(remote_version) > _ver_tuple(current_version)
-
     return {
-        "update_available": update,
+        "update_available": remote_version != current_version,
         "current_version": current_version,
         "remote_version": remote_version,
         "remote_author": remote_author,
         "source_url": source_url,
-    }
-
-
-@router.get("/api/plugins/{plugin_name}/check-deps")
-async def check_plugin_deps(plugin_name: str, _=Depends(require_login)):
-    """Check dependency status for a plugin."""
-    import sys
-    from core.plugin_loader import plugin_loader
-
-    info = plugin_loader.get_plugin_info(plugin_name)
-    if not info:
-        raise HTTPException(status_code=404, detail=f"Unknown plugin: {plugin_name}")
-
-    manifest = info.get("manifest", {})
-    deps = manifest.get("pip_dependencies", [])
-    missing = plugin_loader._check_dependencies(manifest)
-
-    # Detect environment type
-    conda_env = os.environ.get("CONDA_DEFAULT_ENV")
-    in_venv = sys.prefix != sys.base_prefix
-    if conda_env:
-        env_type, env_name = "conda", conda_env
-    elif in_venv:
-        env_type, env_name = "venv", os.path.basename(sys.prefix)
-    else:
-        env_type, env_name = "system", "system"
-
-    can_auto = env_type in ("conda", "venv")
-    command = f"pip install {' '.join(missing)}" if missing else None
-
-    return {
-        "deps": deps, "missing": missing, "installed": [d for d in deps if d not in missing],
-        "env_type": env_type, "env_name": env_name,
-        "can_auto_install": can_auto, "command": command,
-    }
-
-
-@router.post("/api/plugins/{plugin_name}/install-deps")
-async def install_plugin_deps(plugin_name: str, _=Depends(require_login)):
-    """Install missing pip dependencies for a plugin.
-
-    Only runs inside conda or venv — refuses on bare system Python.
-    """
-    import subprocess
-    import sys
-    from core.plugin_loader import plugin_loader
-
-    info = plugin_loader.get_plugin_info(plugin_name)
-    if not info:
-        raise HTTPException(status_code=404, detail=f"Unknown plugin: {plugin_name}")
-
-    manifest = info.get("manifest", {})
-    missing = plugin_loader._check_dependencies(manifest)
-    if not missing:
-        return {"status": "ok", "message": "All dependencies already installed", "installed": []}
-
-    # Environment safety gate
-    conda_env = os.environ.get("CONDA_DEFAULT_ENV")
-    in_venv = sys.prefix != sys.base_prefix
-    if not conda_env and not in_venv:
-        raise HTTPException(status_code=400, detail=(
-            "Sapphire is running in system Python — auto-install disabled for safety. "
-            f"Run manually: pip install {' '.join(missing)}"
-        ))
-
-    env_label = f"conda:{conda_env}" if conda_env else f"venv:{os.path.basename(sys.prefix)}"
-    logger.info(f"[PLUGINS] Installing deps for {plugin_name} in {env_label}: {missing}")
-
-    try:
-        result = subprocess.run(
-            [sys.executable, "-m", "pip", "install", *missing],
-            capture_output=True, text=True, timeout=120,
-        )
-    except subprocess.TimeoutExpired:
-        raise HTTPException(status_code=504, detail="pip install timed out (120s)")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"pip install failed: {e}")
-
-    if result.returncode != 0:
-        return JSONResponse(status_code=500, content={
-            "status": "error", "message": "pip install failed",
-            "output": result.stderr or result.stdout, "command": f"pip install {' '.join(missing)}",
-        })
-
-    # Verify deps are now importable
-    still_missing = plugin_loader._check_dependencies(manifest)
-
-    # Auto-reload the plugin if all deps are now satisfied
-    if not still_missing:
-        try:
-            plugin_loader.reload_plugin(plugin_name)
-            logger.info(f"[PLUGINS] Auto-reloaded {plugin_name} after dep install")
-        except Exception as e:
-            logger.warning(f"[PLUGINS] Dep install OK but reload failed for {plugin_name}: {e}")
-
-    return {
-        "status": "ok" if not still_missing else "partial",
-        "installed": [d for d in missing if d not in still_missing],
-        "still_missing": still_missing,
-        "output": result.stdout,
-        "env": env_label,
     }
 
 
@@ -889,10 +589,8 @@ async def update_plugin_settings(plugin_name: str, request: Request, _=Depends(r
 
     USER_PLUGIN_SETTINGS_DIR.mkdir(parents=True, exist_ok=True)
     settings_file = USER_PLUGIN_SETTINGS_DIR / f"{plugin_name}.json"
-    tmp_path = settings_file.with_suffix('.tmp')
-    with open(tmp_path, 'w', encoding='utf-8') as f:
+    with open(settings_file, 'w', encoding='utf-8') as f:
         json.dump(settings, f, indent=2)
-    tmp_path.replace(settings_file)
 
     return {"status": "success", "plugin": plugin_name, "settings": settings}
 
@@ -1619,20 +1317,18 @@ async def plugin_route_dispatch(plugin_name: str, path: str, request: Request, _
 
     handler, path_params = result
 
-    # Parse request body for POST/PUT (skip for multipart — handler reads form directly)
+    # Parse request body for POST/PUT
     body = {}
-    content_type = request.headers.get("content-type", "")
-    if request.method in ("POST", "PUT") and "multipart" not in content_type:
+    if request.method in ("POST", "PUT"):
         try:
             body = await request.json()
         except Exception:
             body = {}
 
-    # Build handler kwargs: path params + body + settings + credentials + query params + request
+    # Build handler kwargs: path params + body + settings + query params + request
     settings = plugin_loader.get_plugin_settings(plugin_name)
-    credentials = plugin_loader.get_credentials()
     query_params = dict(request.query_params)
-    kwargs = {**path_params, "body": body, "settings": settings, "credentials": credentials, "query": query_params, "request": request}
+    kwargs = {**path_params, "body": body, "settings": settings, "query": query_params, "request": request}
 
     # Call handler (may be sync — run in threadpool)
     import asyncio

@@ -146,7 +146,7 @@ export function off(eventType, handler) {
 /**
  * Dispatch an event to all registered handlers
  */
-export function dispatch(eventType, data, timestamp) {
+function dispatch(eventType, data, timestamp) {
     const set = handlers.get(eventType);
     if (set) {
         for (const handler of set) {
@@ -241,17 +241,11 @@ export const Events = {
 
     // Plugin events
     PLUGIN_RELOADED: 'plugin_reloaded',
-    PLUGIN_LOAD_ERROR: 'plugin_load_error',
 
     // Agent events
     AGENT_SPAWNED: 'agent_spawned',
     AGENT_COMPLETED: 'agent_completed',
     AGENT_DISMISSED: 'agent_dismissed',
-
-    // User interaction events (avatar state triggers + overlay)
-    USER_TYPING: 'user_typing',       // User is typing in chat input
-    USER_SENT: 'user_sent',           // User sent a message — data: {text}
-    CHAT_CHUNK: 'chat_chunk',         // AI streaming text chunk — data: {text}
 
     // Connection events
     CONNECTED: 'connected',           // Server confirms SSE subscription

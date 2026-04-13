@@ -6,12 +6,13 @@ import time
 from pathlib import Path
 
 import requests
+from core.identity import github_repo
 
 logger = logging.getLogger(__name__)
 
 VERSION_FILE = Path(__file__).parent.parent / 'VERSION'
 REPO_DIR = VERSION_FILE.parent
-GITHUB_REPO = 'ddxfish/sapphire'
+GITHUB_REPO = github_repo()
 GITHUB_RAW_URL = f'https://raw.githubusercontent.com/{GITHUB_REPO}'
 CHECK_INTERVAL = 86400  # 24 hours
 

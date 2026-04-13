@@ -190,15 +190,11 @@ class OpenAIResponsesProvider(BaseProvider):
         return resp_tools
     
     def _extract_system_prompt(self, messages: List[Dict[str, Any]]) -> Optional[str]:
-        """Extract system prompt from messages (becomes 'instructions' in Responses API).
-        Concatenates all system messages (static prompt + dynamic story context)."""
-        parts = []
+        """Extract system prompt from messages (becomes 'instructions' in Responses API)."""
         for msg in messages:
             if msg.get('role') == 'system':
-                content = msg.get('content', '')
-                if content:
-                    parts.append(content)
-        return '\n\n'.join(parts) if parts else None
+                return msg.get('content', '')
+        return None
     
     def chat_completion(
         self,

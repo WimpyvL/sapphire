@@ -8,31 +8,29 @@ System architecture and internals for developers and power users. For API endpoi
 
 ```
 main.py (runner with restart loop)
-└── sapphire.py (VoiceChatSystem)
+└── sani.py (VoiceChatSystem)
     ├── LLMChat (core/chat/)
-    │   ├── llm_providers → Claude, OpenAI, Gemini (core) + custom + plugin-provided
+    │   ├── llm_providers → Claude, OpenAI, Fireworks, LM Studio, Responses
     │   ├── plugin_loader → plugins/*, user/plugins/*
     │   ├── function_manager → functions/*, scopes, story tools
     │   └── session_manager → chat history (SQLite)
-    ├── Continuity (core/continuity/)
+    ├── Continuity (core/modules/continuity/)
     │   ├── scheduler → cron-based task runner
     │   └── executor → context isolation, task execution
-    ├── TTS (core/tts/) → provider-based: Kokoro (core) + plugins
-    ├── STT (core/stt/) → provider-based: faster-whisper, fireworks-whisper (core) + plugins
+    ├── TTS Server (core/tts/) → port 5012 (HTTP subprocess)
+    ├── STT (core/stt/) → thread in main process (hot-toggleable)
     ├── Wake Word (core/wakeword/) → thread (hot-toggleable)
-    ├── Provider Registry (core/provider_registry.py) → TTS, STT, Embedding, LLM
-    ├── Agents (core/agents/) → agent spawning, registry, lifecycle
-    ├── FastAPI Server (core/api_fastapi.py + core/routes/) → 0.0.0.0:8073
+├── FastAPI Server (core/api_fastapi.py) → 0.0.0.0:3004
     └── Event Bus (core/event_bus.py) → SSE pub/sub
 ```
 
-**Process model:** `main.py` is a runner that spawns `sapphire.py` with automatic restart on crash or restart request (exit code 42). `sapphire.py` spawns the TTS server as a subprocess via `ProcessManager`. STT runs as a thread. The FastAPI/uvicorn server handles all web traffic directly (auth, static files, API, SSE) on a single port. Everything else runs in the main process.
+**Process model:** `main.py` is a runner that spawns `sani.py` with automatic restart on crash or restart request (exit code 42). `sani.py` spawns the TTS server as a subprocess via `ProcessManager`. STT runs as a thread. The FastAPI/uvicorn server handles all web traffic directly (auth, static files, API, SSE) on a single port. Everything else runs in the main process.
 
 ---
 
 ## Scopes Architecture
 
-Eleven scope types isolate data per-chat via ContextVars in `function_manager.py`:
+Seven scope types isolate data per-chat via ContextVars in `function_manager.py`:
 
 | Scope | What it isolates | Overlay |
 |-------|-----------------|---------|
@@ -42,11 +40,7 @@ Eleven scope types isolate data per-chat via ContextVars in `function_manager.py
 | `scope_people` | Contacts | Yes |
 | `scope_email` | Email account | No |
 | `scope_bitcoin` | Wallet | No |
-| `scope_gcal` | Calendar account | No |
-| `scope_telegram` | Telegram account | No |
-| `scope_discord` | Discord account | No |
 | `scope_rag` | Per-chat documents | No (strict) |
-| `scope_private` | Private mode (bool) | N/A |
 
 **Global overlay:** Memory, goals, knowledge, and people scopes see both their own data AND entries in the "global" scope. RAG is strict — only the chat's own documents.
 
@@ -93,7 +87,7 @@ user/
 └── logs/                   # Application logs
 ```
 
-**Bootstrap:** On first run, `core/setup.py` copies factory defaults from `core/prompt_defaults/` to `user/`.
+**Bootstrap:** On first run, `core/setup.py` copies factory defaults from `core/modules/system/` to `user/`.
 
 ---
 
@@ -148,18 +142,18 @@ The settings manager tracks which changes need restart via `get_pending_restart_
 ```json
 {
   "LLM_PROVIDERS": {
+    "lmstudio": { "provider": "openai", "base_url": "http://127.0.0.1:1234/v1", "enabled": true },
     "claude": { "provider": "claude", "model": "claude-sonnet-4-5", "enabled": false },
-    "openai": { "provider": "openai", "base_url": "https://api.openai.com/v1", "model": "gpt-4o", "enabled": false },
-    "gemini": { "provider": "gemini", "base_url": "https://generativelanguage.googleapis.com/v1beta/openai/", "model": "gemini-2.5-flash", "enabled": false }
+    "fireworks": { "provider": "fireworks", "base_url": "...", "model": "...", "enabled": false },
+    "openai": { "provider": "openai", "base_url": "...", "model": "gpt-4o", "enabled": false },
+    "responses": { "provider": "responses", "base_url": "...", "enabled": false },
+    "other": { "provider": "openai", "base_url": "...", "enabled": false }
   },
-  "LLM_CUSTOM_PROVIDERS": {
-    "lmstudio": { "template": "openai", "base_url": "http://127.0.0.1:1234/v1", "is_local": true, "enabled": true }
-  },
-  "LLM_FALLBACK_ORDER": ["lmstudio", "claude", "gemini"]
+  "LLM_FALLBACK_ORDER": ["lmstudio", "claude", "fireworks", "openai"]
 }
 ```
 
-Core providers (claude, openai, gemini) live in `LLM_PROVIDERS`. Custom/user-added providers (lmstudio default) live in `LLM_CUSTOM_PROVIDERS`. Plugins can also register LLM providers via `capabilities.providers`. Providers are tried in fallback order. Each chat can override to use a specific provider.
+Providers are tried in fallback order. Each chat can override to use a specific provider.
 
 ### Claude-Friendly Settings
 
@@ -180,13 +174,13 @@ Cache TTL can be 5m (default) or 1h for longer sessions.
 |----------|---------|--------------|
 | **Claude** | Extended Thinking | Structured thinking blocks with budget, `thinking` API param |
 | **GPT-5.x** | Reasoning Summaries | Responses API, `reasoning_summary` param |
-| **Gemini** | Reasoning Effort | Gemini 2.5 Flash/Pro use `reasoning_effort` param |
+| **Fireworks** | Reasoning Effort | Qwen-Thinking, Kimi-K2 use `reasoning_effort` param |
 
 **Claude:** Enable in LLM settings → Claude → Extended Thinking. Budget default: 10,000 tokens. Auto-disables for continue mode and tool cycles without thinking. Thinking blocks preserved across tool calls.
 
 **GPT-5.x:** Uses Responses API. Configure `reasoning_effort` (low/medium/high) and `reasoning_summary` (auto/detailed).
 
-**Gemini:** Models like Gemini 2.5 Flash support thinking via `reasoning_effort` parameter (low/medium/high).
+**Fireworks:** Models with "thinking" in the name return reasoning in `reasoning_content` field.
 
 **Cross-provider:** Thinking blocks are stripped from history when switching to non-Claude providers.
 
@@ -218,7 +212,7 @@ API keys, SOCKS credentials, email accounts, and wallet keys stored separately v
 
 **Not included in backups** for security. Sensitive fields encrypted with machine-identity Fernet key.
 
-**Priority:** Stored credential → Environment variable fallback (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `GOOGLE_API_KEY`, `SAPPHIRE_SOCKS_USERNAME`, `SAPPHIRE_SOCKS_PASSWORD`)
+**Priority:** Stored credential → Environment variable fallback (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `FIREWORKS_API_KEY`, `SAPPHIRE_SOCKS_USERNAME`, `SAPPHIRE_SOCKS_PASSWORD`)
 
 ### Credential Encryption Details
 
@@ -291,7 +285,7 @@ When `false`, only signed+verified plugins load. Unsigned plugins are blocked en
 
 | Service | Port | Binding |
 |---------|------|---------|
-| FastAPI Server | 8073 | `0.0.0.0` (all interfaces, HTTPS) |
+| FastAPI Server | 3004 | `0.0.0.0` (all interfaces, HTTPS) |
 | TTS Server | 5012 | `0.0.0.0` (configurable) |
 | LM Studio (default) | 1234 | External |
 
@@ -301,24 +295,19 @@ When `false`, only signed+verified plugins load. Unsigned plugins are blocked en
 
 ### TTS (Text-to-Speech)
 
-- Registry: `core/tts/providers/__init__.py` (provider registry)
 - Server: `core/tts/tts_server.py` (Kokoro, HTTP subprocess)
 - Client: `core/tts/tts_client.py`
-- Core providers: Kokoro (local), Null (disabled)
-- Plugin providers: ElevenLabs, gTTS (Google Translate), and any plugin-registered provider
+- Null provider: `core/tts/providers/null.py` (when disabled, wrapped in TTSClient)
 
 Started by `ProcessManager` if `TTS_ENABLED=true`. Auto-restarts on crash. Server auto-restarts at 3GB memory or 500 requests.
 
-Kokoro: 17 voices (American and British, male and female). Pitch shifting via resampling, speed control via Kokoro parameter. Plugin providers appear in Settings → TTS → Provider dropdown.
+17 voices available (American and British, male and female). Pitch shifting via resampling, speed control via Kokoro parameter.
 
 ### STT (Speech-to-Text)
 
-- Registry: `core/stt/providers/__init__.py` (provider registry)
 - Server: `core/stt/server.py` (faster-whisper, loaded in main process)
 - Recorder: `core/stt/recorder.py` (adaptive VAD, silence detection)
 - Guard: `core/stt/utils.py` (shared `can_transcribe()` check)
-- Core providers: faster-whisper (local GPU/CPU), fireworks-whisper (cloud)
-- Plugin providers: any plugin-registered STT provider
 
 Runs as thread if `STT_ENABLED=true`. Supports **hot-toggle** at runtime via `VoiceChatSystem.toggle_stt()`. GPU (CUDA) with CPU fallback.
 
@@ -344,7 +333,7 @@ Blocks cloud LLM providers to keep conversations local.
 
 - `is_local: True` providers (lmstudio) — always allowed
 - `privacy_check_whitelist: True` providers — allowed if `base_url` passes whitelist
-- Cloud providers (claude, openai, gemini) — blocked
+- Cloud providers (claude, openai, fireworks) — blocked
 - Whitelist supports CIDR ranges (e.g., `192.168.0.0/16`)
 
 Toggle via Settings or `PUT /api/privacy`.
@@ -392,9 +381,9 @@ Each session has message history, per-chat settings (prompt, voice, toolset, LLM
 | Path | Purpose |
 |------|---------|
 | `main.py` | Runner with restart loop |
-| `sapphire.py` | VoiceChatSystem entry point |
+| `sani.py` | VoiceChatSystem entry point |
 | `config.py` | Settings proxy |
-| `core/api_fastapi.py` + `core/routes/` | FastAPI server (~280 endpoints across 12 route modules) |
+| `core/api_fastapi.py` | Unified FastAPI server (221 endpoints) |
 | `core/auth.py` | Session auth, CSRF, rate limiting |
 | `core/ssl_utils.py` | Self-signed certificate generation |
 | `core/settings_manager.py` | Settings merge, file watcher, restart tiers |
@@ -403,13 +392,11 @@ Each session has message history, per-chat settings (prompt, voice, toolset, LLM
 | `core/event_bus.py` | Real-time event pub/sub for SSE |
 | `core/chat/chat.py` | LLM orchestration |
 | `core/chat/chat_streaming.py` | SSE response streaming |
-| `core/chat/llm_providers/` | Claude, OpenAI, Gemini (core) + custom + plugin providers |
-| `core/provider_registry.py` | Base registry for TTS, STT, Embedding, LLM |
-| `core/agents/` | Agent spawning, registry, lifecycle |
+| `core/chat/llm_providers/` | Claude, OpenAI, Fireworks, Responses providers |
 | `core/chat/function_manager.py` | Tool loading, scopes, story tools |
 | `core/chat/history.py` | Session management |
 | `core/story_engine/engine.py` | Story state, presets, custom tools |
-| `core/continuity/scheduler.py` | Cron-based task scheduler |
+| `core/modules/continuity/scheduler.py` | Cron-based task scheduler |
 | `core/audio/device_manager.py` | Audio device handling |
 | `functions/knowledge.py` | Knowledge base + people |
 | `functions/memory.py` | Long-term memory + embeddings |
@@ -422,28 +409,25 @@ Sapphire architecture for troubleshooting and development.
 
 PROCESSES:
 - main.py: Runner with restart loop (exit 42 = restart)
-- sapphire.py: Core VoiceChatSystem
-- core/api_fastapi.py + core/routes/: FastAPI server (port 8073, HTTPS, ~280 endpoints)
+- sani.py: Core VoiceChatSystem
+- core/api_fastapi.py: Unified FastAPI server (port 3004, HTTPS, 221 endpoints)
 - TTS server: Kokoro HTTP subprocess (port 5012, if enabled)
 - STT: Faster-whisper thread in main process
 
 PORTS:
-- 8073: FastAPI server (HTTPS, all routes)
+- 3004: FastAPI server (HTTPS, all routes)
 - 5012: TTS server (if enabled)
 - 1234: Default LLM (LM Studio)
 
-SCOPES (11 types, ContextVar-based):
+SCOPES (7 types, ContextVar-based):
 - scope_memory, scope_goal, scope_knowledge, scope_people: global overlay
-- scope_email, scope_bitcoin, scope_gcal, scope_telegram, scope_discord: no overlay
+- scope_email, scope_bitcoin: no overlay
 - scope_rag: strict per-chat isolation
-- scope_private: boolean (no memory writes)
 - Set per-chat in sidebar Mind Scopes
 
 LLM PROVIDERS:
-- Core: claude, openai, gemini (in LLM_PROVIDERS)
-- Custom: lmstudio default (in LLM_CUSTOM_PROVIDERS), user can add more
-- Plugin-provided: any plugin can register LLM providers via capabilities.providers
-- LLM_FALLBACK_ORDER controls Auto mode (default: lmstudio, claude, gemini)
+- lmstudio, claude, fireworks, openai, other, responses
+- LLM_FALLBACK_ORDER controls Auto mode
 - Per-chat override via session settings
 - API keys: ~/.config/sapphire/credentials.json or env vars
 - Privacy mode blocks cloud, whitelist-based for configurable endpoints
@@ -461,7 +445,7 @@ HOT RELOAD:
 - LLM settings, SOCKS, privacy: immediate
 - Ports, models, code: require restart
 
-API: See docs/API.md for all ~280 endpoints
+API: See docs/API.md for all 221 endpoints
 
 DATABASES:
 - user/history/sapphire_history.db: chats, state_current, state_log

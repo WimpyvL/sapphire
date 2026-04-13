@@ -1,9 +1,9 @@
 import tarfile
-import sqlite3
 import logging
 from datetime import datetime
 from pathlib import Path
 import config
+from core.identity import BACKUP_PREFIX, LEGACY_BACKUP_PREFIX
 
 logger = logging.getLogger(__name__)
 
@@ -12,7 +12,6 @@ class Backup:
     """Backup manager for the user/ directory."""
 
     def __init__(self):
-        self._stop_event = None
         self.base_dir = Path(getattr(config, 'BASE_DIR', Path(__file__).parent.parent))
         self.user_dir = self.base_dir / "user"
         self.backup_dir = self.base_dir / "user_backups"
@@ -50,12 +49,10 @@ class Backup:
             return None
 
         timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
-        filename = f"sapphire_{timestamp}_{backup_type}.tar.gz"
+        filename = f"{BACKUP_PREFIX}_{timestamp}_{backup_type}.tar.gz"
         filepath = self.backup_dir / filename
 
         try:
-            # Checkpoint SQLite WAL files before backup to ensure consistent snapshots
-            self._checkpoint_databases()
             with tarfile.open(filepath, "w:gz") as tar:
                 tar.add(self.user_dir, arcname="user")
 
@@ -66,16 +63,6 @@ class Backup:
             logger.error(f"Backup failed: {e}")
             return None
 
-    def _checkpoint_databases(self):
-        """Flush WAL journals on all SQLite databases so tar captures consistent state."""
-        for db_path in self.user_dir.rglob("*.db"):
-            try:
-                conn = sqlite3.connect(str(db_path))
-                conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                conn.close()
-            except Exception as e:
-                logger.debug(f"WAL checkpoint skipped for {db_path.name}: {e}")
-
     def list_backups(self):
         """List all backups grouped by type."""
         backups = {"daily": [], "weekly": [], "monthly": [], "manual": []}
@@ -83,21 +70,26 @@ class Backup:
         if not self.backup_dir.exists():
             return backups
 
-        for f in self.backup_dir.glob("sapphire_*.tar.gz"):
-            try:
-                parts = f.stem.split("_")
-                if len(parts) >= 4:
-                    backup_type = parts[-1].replace('.tar', '')
-                    if backup_type in backups:
-                        backups[backup_type].append({
-                            "filename": f.name,
-                            "date": parts[1],
-                            "time": parts[2],
-                            "size": f.stat().st_size,
-                            "path": str(f)
-                        })
-            except Exception as e:
-                logger.warning(f"Could not parse backup filename {f.name}: {e}")
+        patterns = [f"{BACKUP_PREFIX}_*.tar.gz"]
+        if LEGACY_BACKUP_PREFIX != BACKUP_PREFIX:
+            patterns.append(f"{LEGACY_BACKUP_PREFIX}_*.tar.gz")
+
+        for pattern in patterns:
+            for f in self.backup_dir.glob(pattern):
+                try:
+                    parts = f.stem.split("_")
+                    if len(parts) >= 4:
+                        backup_type = parts[-1].replace('.tar', '')
+                        if backup_type in backups:
+                            backups[backup_type].append({
+                                "filename": f.name,
+                                "date": parts[1],
+                                "time": parts[2],
+                                "size": f.stat().st_size,
+                                "path": str(f)
+                            })
+                except Exception as e:
+                    logger.warning(f"Could not parse backup filename {f.name}: {e}")
 
         for backup_type in backups:
             backups[backup_type].sort(key=lambda x: x["filename"], reverse=True)
@@ -112,7 +104,7 @@ class Backup:
         filepath = self.backup_dir / filename
         if not filepath.exists():
             return False
-        if not filepath.suffix == ".gz" or not filename.startswith("sapphire_"):
+        if not filepath.suffix == ".gz" or not filename.startswith((f"{BACKUP_PREFIX}_", f"{LEGACY_BACKUP_PREFIX}_")):
             return False
 
         try:
@@ -150,43 +142,9 @@ class Backup:
         if "/" in filename or "\\" in filename:
             return None
         filepath = self.backup_dir / filename
-        if filepath.exists() and filename.startswith("sapphire_"):
+        if filepath.exists() and filename.startswith((f"{BACKUP_PREFIX}_", f"{LEGACY_BACKUP_PREFIX}_")):
             return filepath
         return None
-
-
-    def stop(self):
-        """Signal the backup scheduler to stop."""
-        if self._stop_event:
-            self._stop_event.set()
-
-    def start_scheduler(self):
-        """Start background thread that runs scheduled backups at BACKUPS_HOUR (default 3am local time)."""
-        import threading
-        from datetime import timedelta
-        self._stop_event = threading.Event()
-
-        def _backup_loop():
-            while not self._stop_event.is_set():
-                hour = getattr(config, 'BACKUPS_HOUR', 3)
-                now = datetime.now()
-                target = now.replace(hour=hour, minute=0, second=0, microsecond=0)
-                if target <= now:
-                    target += timedelta(days=1)
-                wait_seconds = (target - now).total_seconds()
-                logger.info(f"Backup scheduler: next run in {wait_seconds / 3600:.1f}h at {target.strftime('%Y-%m-%d %H:%M')}")
-                if self._stop_event.wait(wait_seconds):
-                    break  # Stop requested during sleep
-                try:
-                    result = self.run_scheduled()
-                    logger.info(f"Backup scheduler: {result}")
-                except Exception as e:
-                    logger.error(f"Backup scheduler failed: {e}")
-
-        thread = threading.Thread(target=_backup_loop, daemon=True, name="backup-scheduler")
-        thread.start()
-        hour = getattr(config, 'BACKUPS_HOUR', 3)
-        logger.info(f"Backup scheduler started (daily at {hour}:00 local time)")
 
 
 backup_manager = Backup()

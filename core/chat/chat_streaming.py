@@ -78,7 +78,6 @@ class StreamingChat:
             self.cancel_flag = False
             self.current_stream = None
             self.ephemeral = False
-            self.main_chat.session_manager._is_streaming = True
 
             # Update story engine FIRST (before building messages) based on current settings
             self.main_chat._update_story_engine()
@@ -158,10 +157,8 @@ class StreamingChat:
 
             # Send only enabled tools - model should only know about active tools
             # Snapshot names too — used to validate tool calls against what LLM actually received
-            # Snapshot executors to protect against reload yanking executors mid-chat
             enabled_tools = self.main_chat.function_manager.enabled_tools
             _allowed_tool_names = {t["function"]["name"] for t in enabled_tools if "function" in t}
-            _executor_snapshot = self.main_chat.function_manager.snapshot_executors()
             provider_key, provider, model_override = self.main_chat._select_provider()
             
             # Determine effective model (per-chat override or provider default)
@@ -170,7 +167,7 @@ class StreamingChat:
             gen_params = get_generation_params(
                 provider_key,
                 effective_model,
-                {**getattr(config, 'LLM_PROVIDERS', {}), **getattr(config, 'LLM_CUSTOM_PROVIDERS', {})}
+                getattr(config, 'LLM_PROVIDERS', {})
             )
             
             # Pass model override to provider if set
@@ -235,24 +232,20 @@ class StreamingChat:
                         
                         if event_type == "content":
                             text = event.get("text", "")
-                            # Close thinking tag if transitioning from think to prose
-                            if in_thinking:
-                                yield {"type": "content", "text": "</think>\n\n"}
-                                in_thinking = False
                             current_content += text
                             yield {"type": "content", "text": text}
-
+                        
                         elif event_type == "thinking":
                             # Thinking from Claude - emit as content with tags for UI
                             text = event.get("text", "")
                             current_thinking += text
-
+                            
                             # Emit thinking wrapped in tags for UI rendering
                             if not in_thinking:
                                 yield {"type": "content", "text": "<think>"}
                                 in_thinking = True
                             yield {"type": "content", "text": text}
-
+                        
                         elif event_type == "tool_call":
                             # Close thinking tag if open before tool calls
                             if in_thinking:
@@ -432,7 +425,7 @@ class StreamingChat:
                         publish(Events.TOOL_EXECUTING, {"name": function_name})
 
                         try:
-                            function_result = self.main_chat.function_manager.execute_function(function_name, function_args, scopes=_scopes, allowed_tools=_allowed_tool_names, executor_snapshot=_executor_snapshot)
+                            function_result = self.main_chat.function_manager.execute_function(function_name, function_args, scopes=_scopes, allowed_tools=_allowed_tool_names)
                             result_str, tool_imgs = _extract_tool_images(function_result, self.main_chat.session_manager)
                             if tool_imgs:
                                 iteration_tool_images.extend(tool_imgs)
@@ -602,10 +595,6 @@ class StreamingChat:
 
                     return
             
-            # If cancelled, don't make another API call — fall through to finally block
-            if self.cancel_flag:
-                return
-
             # Loop exhausted - force final response
             logger.warning(f"[STREAMING] Exceeded max iterations ({config.MAX_TOOL_ITERATIONS}). Forcing final answer.")
             
@@ -638,12 +627,9 @@ class StreamingChat:
                     
                     if event_type == "content":
                         chunk = event.get("text", "")
-                        if in_thinking:
-                            yield {"type": "content", "text": "</think>\n\n"}
-                            in_thinking = False
                         final_content += chunk
                         yield {"type": "content", "text": chunk}
-
+                    
                     elif event_type == "thinking":
                         text = event.get("text", "")
                         final_thinking += text
@@ -743,11 +729,6 @@ class StreamingChat:
             raise
         except Exception as e:
             logger.error(f"[ERR] [STREAMING FATAL] Unhandled error: {e}", exc_info=True)
-            # Save error so history doesn't end with a dangling user message
-            # (consecutive user messages break Claude's alternating requirement)
-            self.main_chat.session_manager.add_assistant_final(
-                f"[Error: {type(e).__name__}: {e}]"
-            )
             self._cleanup_stream()
             raise
         
@@ -757,28 +738,10 @@ class StreamingChat:
             # (e.g. user hit Stop mid-tool-execution)
             if self.main_chat.session_manager._in_tool_cycle:
                 logger.info("[CLEANUP] Closing orphaned tool cycle from cancelled stream")
-                # Inject dummy tool_results for any pending tool_calls so LLM history
-                # stays valid (providers require tool_result after tool_calls)
-                try:
-                    msgs = self.main_chat.session_manager.current_chat.messages
-                    for msg in reversed(msgs):
-                        if msg.get("role") == "assistant" and msg.get("tool_calls"):
-                            existing_results = {m.get("tool_call_id") for m in msgs if m.get("role") == "tool"}
-                            for tc in msg["tool_calls"]:
-                                tc_id = tc.get("id", "")
-                                if tc_id not in existing_results:
-                                    self.main_chat.session_manager.add_tool_result(
-                                        tc_id, tc.get("function", {}).get("name", "unknown"),
-                                        "[Cancelled by user]"
-                                    )
-                            break
-                except Exception as e:
-                    logger.warning(f"[CLEANUP] Failed to inject cancel tool results: {e}")
                 self.main_chat.session_manager.add_assistant_final(
                     content="[Cancelled during tool execution]"
                 )
             self._cleanup_stream()
             self.cancel_flag = False
             self.is_streaming = False
-            self.main_chat.session_manager._is_streaming = False
             publish(Events.AI_TYPING_END)

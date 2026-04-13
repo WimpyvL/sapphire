@@ -33,7 +33,6 @@ const VIEW_MODULES = {
     mind:     `./views/mind.js${_v}`,
     settings: `./views/settings.js${_v}`,
     help:     `./views/help.js${_v}`,
-    apps:     `./views/apps.js${_v}`,
 };
 
 async function loadViews() {
@@ -124,85 +123,6 @@ async function init() {
         try {
             initData = await getInitData();
             ui.initFromInitData(initData);
-            // Show any plugin load errors from startup (before SSE was connected)
-            if (initData?.load_errors?.length) {
-                for (const err of initData.load_errors) {
-                    const hint = err.hint ? ` — ${err.hint}` : '';
-                    const isDeps = err.missing_deps?.length > 0;
-                    ui.showToast(`Plugin '${err.plugin}': ${err.error}${hint}`, isDeps ? 'warning' : 'error', isDeps ? 0 : 10000);
-                }
-            }
-            // Discover plugin apps — promote nav apps, show Apps grid if others exist
-            try {
-                const appsRes = await fetch('/api/apps');
-                if (appsRes.ok) {
-                    const appsData = await appsRes.json();
-                    const allApps = appsData.apps || [];
-                    const navApps = allApps.filter(a => a.nav);
-                    const gridApps = allApps.filter(a => !a.nav);
-
-                    // Inject nav-promoted plugin apps into the navrail
-                    const MAX_NAV_APPS = 3;
-                    const rail = document.getElementById('nav-rail');
-                    const navAppsBtn = document.getElementById('nav-apps');
-                    for (const app of navApps.slice(0, MAX_NAV_APPS)) {
-                        // Create nav item
-                        const btn = document.createElement('button');
-                        btn.className = 'nav-item';
-                        btn.dataset.view = `app-${app.name}`;
-                        btn.innerHTML = `<span class="nav-icon">${app.icon || '📦'}</span><span class="nav-label">${app.label}</span>`;
-                        if (navAppsBtn) rail.insertBefore(btn, navAppsBtn);
-                        else {
-                            const spacer = rail.querySelector('.nav-spacer');
-                            if (spacer) rail.insertBefore(btn, spacer);
-                            else rail.appendChild(btn);
-                        }
-
-                        // Create view container
-                        const appContent = document.getElementById('app-content');
-                        if (appContent) {
-                            const viewDiv = document.createElement('div');
-                            viewDiv.id = `view-app-${app.name}`;
-                            viewDiv.className = 'view';
-                            viewDiv.style.display = 'none';
-                            appContent.appendChild(viewDiv);
-                        }
-
-                        // Register router view
-                        const appName = app.name;
-                        registerView(`app-${appName}`, {
-                            init(el) {},
-                            async show() {
-                                const el = document.getElementById(`view-app-${appName}`);
-                                if (!el) return;
-                                if (el.dataset.loaded) return;
-                                const v = document.querySelector('meta[name="boot-version"]')?.content || '';
-                                try {
-                                    const mod = await import(`/plugin-web/${appName}/app/index.js?v=${v}`);
-                                    if (mod.render) await mod.render(el);
-                                    if (mod.cleanup) el._appCleanup = mod.cleanup;
-                                    el.dataset.loaded = 'true';
-                                } catch (e) {
-                                    el.innerHTML = `<div class="view-placeholder"><h2>Failed to load ${appName}</h2><p style="color:var(--text-muted)">${e.message}</p></div>`;
-                                }
-                            },
-                            hide() {
-                                const el = document.getElementById(`view-app-${appName}`);
-                                if (el?._appCleanup) {
-                                    try { el._appCleanup(); } catch {}
-                                    el._appCleanup = null;
-                                    el.dataset.loaded = '';
-                                }
-                            }
-                        });
-                    }
-
-                    // Show Apps grid nav if there are non-nav apps (or overflow nav apps)
-                    const appsNavBtn = document.getElementById('nav-apps');
-                    const hasGridApps = gridApps.length > 0 || navApps.length > MAX_NAV_APPS;
-                    if (appsNavBtn && hasGridApps) appsNavBtn.style.display = '';
-                }
-            } catch {}
         } catch (e) {
             console.warn('[Init] Could not fetch init data:', e);
         }
@@ -451,39 +371,9 @@ function initEventBus() {
     });
     document.addEventListener('sapphire:plugin_toggled', () => reloadPluginScripts());
 
-    // Plugin load errors — sticky toast for missing deps, timed for other errors
-    eventBus.on(eventBus.Events.PLUGIN_LOAD_ERROR, (data) => {
-        const hint = data?.hint ? ` — ${data.hint}` : '';
-        const isDeps = data?.missing_deps?.length > 0;
-        ui.showToast(
-            `Plugin '${data?.plugin}': ${data?.error}${hint}`,
-            isDeps ? 'warning' : 'error',
-            isDeps ? 0 : 10000
-        );
-    });
-
-    // Continuity task errors — toast so user knows a scheduled task failed
-    eventBus.on(eventBus.Events.CONTINUITY_TASK_ERROR, (data) => {
-        ui.showToast(`Task "${data?.task || 'Unknown'}": ${data?.error || 'failed'}`, 'error', 10000);
-    });
-
     // Server restart detection — full state resync
     eventBus.on(eventBus.Events.SERVER_RESTARTED, async () => {
         console.log('[Main] Server restarted — full resync');
-        await refreshInitData();
-        await populateChatDropdown();
-        await refresh(false);
-        await updateScene();
-    });
-
-    // SSE reconnect — resync state in case events were missed during disconnect
-    let _sseConnectedOnce = false;
-    eventBus.on(eventBus.Events.BUS_CONNECTED, async () => {
-        if (!_sseConnectedOnce) {
-            _sseConnectedOnce = true;
-            return; // Skip initial connect — state is fresh from page load
-        }
-        console.log('[Main] SSE reconnected — resyncing state');
         await refreshInitData();
         await populateChatDropdown();
         await refresh(false);

@@ -18,41 +18,33 @@ _thread: threading.Thread = None
 _stop_event = threading.Event()
 _plugin_loader = None
 _poll_interval: int = 120  # seconds, overridden by settings
-_lifecycle_lock = threading.Lock()
 
 
 def start(plugin_loader, settings):
     """Called by plugin_loader on load."""
     global _thread, _plugin_loader, _poll_interval
 
-    with _lifecycle_lock:
-        _plugin_loader = plugin_loader
-        _poll_interval = int(settings.get("poll_interval", 120))
+    _plugin_loader = plugin_loader
+    _poll_interval = int(settings.get("poll_interval", 120))
 
-        if _poll_interval < 30:
-            _poll_interval = 30  # sanity floor
+    if _poll_interval < 30:
+        _poll_interval = 30  # sanity floor
 
-        if _thread and _thread.is_alive():
-            logger.warning("[EMAIL] Daemon already running — skipping double-start")
-            return
+    _stop_event.clear()
+    _thread = threading.Thread(target=_poll_loop, daemon=True, name="email-daemon")
+    _thread.start()
 
-        _stop_event.clear()
-        _thread = threading.Thread(target=_poll_loop, daemon=True, name="email-daemon")
-        _thread.start()
-
-        plugin_loader.register_reply_handler("email", _reply_handler)
+    plugin_loader.register_reply_handler("email", _reply_handler)
     logger.info(f"[EMAIL] Daemon started (poll every {_poll_interval}s)")
 
 
 def stop():
     """Called by plugin_loader on unload."""
     global _thread
-
-    with _lifecycle_lock:
-        _stop_event.set()
-        if _thread and _thread.is_alive():
-            _thread.join(timeout=5)
-        _thread = None
+    _stop_event.set()
+    if _thread and _thread.is_alive():
+        _thread.join(timeout=5)
+    _thread = None
     logger.info("[EMAIL] Daemon stopped")
 
 
@@ -72,25 +64,18 @@ def _poll_loop():
 
     while not _stop_event.is_set():
         try:
-            # Only poll accounts that have active daemon tasks
-            active = _plugin_loader.active_daemon_accounts("email_message")
-            if not active:
-                logger.debug("[EMAIL] No active daemon tasks — skipping poll")
-            else:
-                accounts = credentials.list_email_accounts()
-                for acct in accounts:
-                    if _stop_event.is_set():
-                        return
-                    scope = acct["scope"]
-                    if scope not in active:
+            accounts = credentials.list_email_accounts()
+            for acct in accounts:
+                if _stop_event.is_set():
+                    return
+                scope = acct["scope"]
+                try:
+                    creds = credentials.get_email_account(scope)
+                    if not creds.get("address"):
                         continue
-                    try:
-                        creds = credentials.get_email_account(scope)
-                        if not creds.get("address"):
-                            continue
-                        _check_account(scope, creds)
-                    except Exception as e:
-                        logger.warning(f"[EMAIL] Poll failed for '{scope}': {e}")
+                    _check_account(scope, creds)
+                except Exception as e:
+                    logger.warning(f"[EMAIL] Poll failed for '{scope}': {e}")
         except Exception as e:
             logger.error(f"[EMAIL] Poll loop error: {e}", exc_info=True)
 
@@ -244,12 +229,6 @@ def _check_account(scope: str, creds: dict):
 
                 from_name, from_addr = _parse_address_header(msg.get("From", ""))
                 _, to_addr = _parse_address_header(msg.get("To", ""))
-
-                # Skip our own outbound mail (SMTP copies, sent-to-inbox)
-                if from_addr and from_addr.lower() == creds.get("address", "").lower():
-                    logger.debug(f"[EMAIL] Skipping own message from {from_addr}")
-                    continue
-
                 subject = _decode_header_value(msg.get("Subject", ""))
                 snippet = _get_snippet(msg)
 

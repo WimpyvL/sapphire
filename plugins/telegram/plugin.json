@@ -1,13 +1,12 @@
 {
   "name": "telegram",
   "version": "1.0.0",
-  "description": "Telegram — bot and client accounts via Telethon",
+  "description": "Telegram — daemon messaging via Client API (Telethon)",
   "author": "sapphire",
   "url": "https://sapphireblue.dev",
   "icon": "\u2708\ufe0f",
   "priority": 50,
   "default_enabled": false,
-  "pip_dependencies": ["telethon"],
   "settingsUI": "plugin",
   "capabilities": {
     "tools": ["tools/telegram_tools.py"],
@@ -38,9 +37,7 @@
             "options": [
               {"value": "text", "label": "Plain Text"},
               {"value": "markdown", "label": "Markdown"},
-              {"value": "html", "label": "HTML"},
-              {"value": "text+voice", "label": "Text + Voice Note"},
-              {"value": "voice", "label": "Voice Note Only"}
+              {"value": "html", "label": "HTML"}
             ],
             "default": "text"
           }
@@ -50,7 +47,6 @@
     "routes": [
       {"method": "GET",  "path": "accounts",          "handler": "routes/auth.py:list_accounts"},
       {"method": "POST", "path": "accounts",          "handler": "routes/auth.py:start_auth"},
-      {"method": "POST", "path": "accounts/bot",      "handler": "routes/auth.py:start_bot_auth"},
       {"method": "POST", "path": "auth/code",         "handler": "routes/auth.py:submit_code"},
       {"method": "POST", "path": "auth/2fa",          "handler": "routes/auth.py:submit_2fa"},
       {"method": "DELETE","path": "accounts/{name}",   "handler": "routes/auth.py:delete_account"}

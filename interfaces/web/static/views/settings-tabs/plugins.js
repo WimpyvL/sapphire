@@ -187,12 +187,6 @@ function _renderCard(p, locked) {
                     ${actions.length ? `<div class="pm-card-actions">${actions.join('')}</div>` : ''}
                 </div>
             </div>
-            ${p.missing_deps?.length ? `
-            <div class="pm-deps-warning" data-plugin-deps="${_esc(p.name)}">
-                <span class="pm-deps-icon">&#x26A0;</span>
-                <span class="pm-deps-text">Missing: ${_esc(p.missing_deps.join(', '))}</span>
-                <button class="btn btn-sm pm-deps-fix-btn" data-deps-plugin="${_esc(p.name)}">Install</button>
-            </div>` : ''}
         </div>
     `;
 }
@@ -217,7 +211,6 @@ export default {
                 <div class="pm-header-top">
                     <div class="pm-summary">Plugins <span class="pm-count-total">${counts.all} total \u00b7 ${counts.enabled} enabled</span></div>
                     <div class="pm-header-actions">
-                        <button class="btn btn-sm pm-action-btn" id="check-all-updates-btn">\uD83D\uDD0D Check Updates</button>
                         <button class="btn btn-sm pm-action-btn" id="rescan-plugins-btn">\uD83D\uDD04 Rescan</button>
                         <button class="btn btn-sm btn-primary pm-action-btn" id="pm-install-toggle">+ Install Plugin</button>
                     </div>
@@ -310,8 +303,7 @@ export default {
                 rescanBtn.disabled = true;
                 rescanBtn.textContent = 'Scanning...';
                 try {
-                    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                    const res = await fetch('/api/plugins/rescan', { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
+                    const res = await fetch('/api/plugins/rescan', { method: 'POST' });
                     if (!res.ok) throw new Error('Rescan failed');
                     const data = await res.json();
                     const added = data.added?.length || 0;
@@ -328,56 +320,6 @@ export default {
                     rescanBtn.disabled = false;
                     rescanBtn.textContent = 'Rescan';
                 }
-            });
-        }
-
-        // Check All Updates button
-        const checkAllBtn = el.querySelector('#check-all-updates-btn');
-        if (checkAllBtn) {
-            checkAllBtn.addEventListener('click', async () => {
-                // Find all user-installed plugins (they have Update buttons)
-                const updateBtns = el.querySelectorAll('.plugin-update-btn');
-                if (!updateBtns.length) {
-                    ui.showToast('No user-installed plugins to check', 'info');
-                    return;
-                }
-                checkAllBtn.disabled = true;
-                checkAllBtn.textContent = 'Checking...';
-                let updatesFound = 0;
-                const results = await Promise.allSettled(
-                    Array.from(updateBtns).map(async (btn) => {
-                        const name = btn.dataset.plugin;
-                        try {
-                            const result = await pluginsAPI.checkUpdate(name);
-                            if (result.update_available) {
-                                updatesFound++;
-                                btn.textContent = `Update to v${result.remote_version}`;
-                                btn.classList.add('btn-primary');
-                                btn.classList.remove('plugin-update-btn');
-                                btn.addEventListener('click', async () => {
-                                    btn.disabled = true;
-                                    btn.textContent = 'Updating...';
-                                    try {
-                                        await pluginsAPI.installPlugin({ url: result.source_url, force: true });
-                                        ui.showToast(`Updated ${name} → v${result.remote_version}`, 'success');
-                                        await ctx.refreshTab();
-                                    } catch (err) {
-                                        ui.showToast(`Update failed: ${err.message}`, 'error', 5000);
-                                        btn.disabled = false;
-                                        btn.textContent = `Update to v${result.remote_version}`;
-                                    }
-                                }, { once: true });
-                            }
-                        } catch { /* skip failed checks */ }
-                    })
-                );
-                if (updatesFound > 0) {
-                    ui.showToast(`${updatesFound} update${updatesFound > 1 ? 's' : ''} available`, 'success');
-                } else {
-                    ui.showToast('All plugins up to date', 'success');
-                }
-                checkAllBtn.disabled = false;
-                checkAllBtn.textContent = 'Check Updates';
             });
         }
 
@@ -561,91 +503,6 @@ export default {
             }
         });
 
-        // ── Install deps (delegated) ──
-        el.addEventListener('click', async e => {
-            const btn = e.target.closest('.pm-deps-fix-btn');
-            if (!btn) return;
-            const name = btn.dataset.depsPlugin;
-            const ctx = el._pluginCtx;
-
-            btn.disabled = true;
-            btn.textContent = 'Checking...';
-            try {
-                // First check what we're dealing with
-                const checkRes = await fetch(`/api/plugins/${name}/check-deps`);
-                if (!checkRes.ok) throw new Error('Failed to check deps');
-                const depInfo = await checkRes.json();
-
-                if (!depInfo.missing?.length) {
-                    ui.showToast('Dependencies already installed — reloading plugin', 'success');
-                    const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                    await fetch(`/api/plugins/${name}/reload`, { method: 'POST', headers: { 'X-CSRF-Token': csrf } });
-                    await ctx.refreshTab();
-                    return;
-                }
-
-                const cmd = depInfo.command;
-                const envLabel = depInfo.env_type === 'conda' ? `conda env "${depInfo.env_name}"`
-                    : depInfo.env_type === 'venv' ? `venv "${depInfo.env_name}"` : 'system Python';
-
-                if (!depInfo.can_auto_install) {
-                    // System Python — manual only
-                    ui.showToast(`Cannot auto-install on ${envLabel}. Run manually:\n${cmd}`, 'warning', 0);
-                    btn.textContent = 'Manual';
-                    btn.disabled = false;
-                    return;
-                }
-
-                // Show confirmation with exact command
-                const confirmed = await showDangerConfirm({
-                    title: `Install Dependencies for ${name}`,
-                    warnings: [
-                        `This will run: ${cmd}`,
-                        `Environment: ${envLabel}`,
-                        'You can also run this command yourself in your terminal',
-                        'Packages are installed from PyPI (the public Python package index)',
-                    ],
-                    buttonLabel: 'Install Now',
-                });
-
-                if (!confirmed) {
-                    // User declined — offer copy
-                    try { await navigator.clipboard.writeText(cmd); } catch {}
-                    ui.showToast(`Command copied: ${cmd}`, 'info', 5000);
-                    btn.textContent = 'Install';
-                    btn.disabled = false;
-                    return;
-                }
-
-                btn.textContent = 'Installing...';
-                const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                const installRes = await fetch(`/api/plugins/${name}/install-deps`, {
-                    method: 'POST', headers: { 'X-CSRF-Token': csrf },
-                });
-                const result = await installRes.json();
-
-                if (result.status === 'ok') {
-                    ui.showToast(`Dependencies installed for ${name} — plugin reloaded`, 'success');
-                    // Update cached plugin data
-                    const cached = ctx.pluginList?.find(p => p.name === name);
-                    if (cached) cached.missing_deps = [];
-                    await ctx.refreshTab();
-                } else if (result.status === 'partial') {
-                    ui.showToast(`Some deps still missing: ${result.still_missing.join(', ')}`, 'warning', 0);
-                    btn.textContent = 'Retry';
-                    btn.disabled = false;
-                } else {
-                    ui.showToast(`Install failed: ${result.message || 'unknown error'}`, 'error', 0);
-                    btn.textContent = 'Failed';
-                    btn.disabled = false;
-                }
-            } catch (err) {
-                ui.showToast(`Dep install failed: ${err.message}`, 'error', 5000);
-                btn.textContent = 'Install';
-                btn.disabled = false;
-            }
-        });
-
         // ── Toggle (delegated) ──
         el.addEventListener('change', async e => {
             const name = e.target.dataset.pluginToggle;
@@ -726,18 +583,6 @@ export default {
                 await ctx.refreshTab();
 
                 window.dispatchEvent(new CustomEvent('functions-changed'));
-                document.dispatchEvent(new CustomEvent('sapphire:plugin_toggled', { detail: data }));
-                // Show sticky toast if plugin enabled but has missing deps
-                if (data.enabled && data.missing_deps?.length) {
-                    if (cached) cached.missing_deps = data.missing_deps;
-                    ui.showToast(
-                        `${cached?.title || name} needs: ${data.missing_deps.join(', ')} — go to Plugins to install`,
-                        'warning', 0
-                    );
-                } else {
-                    if (cached) cached.missing_deps = [];
-                }
-
                 ui.showToast(`${cached?.title || name} ${data.enabled ? 'enabled' : 'disabled'}`, 'success');
             } catch (err) {
                 e.target.checked = !e.target.checked;

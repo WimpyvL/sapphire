@@ -20,6 +20,27 @@ PROJECT_ROOT = Path(__file__).parent.parent.parent
 STATIC_DIR = PROJECT_ROOT / "interfaces" / "web" / "static"
 
 
+def _check_optional_packages():
+    checks = {
+        "tts": {"package": "Kokoro TTS", "requirements": "install/requirements-tts.txt", "mod": "kokoro"},
+        "stt": {"package": "Faster Whisper", "requirements": "install/requirements-stt.txt", "mod": "faster_whisper"},
+        "wakeword": {"package": "OpenWakeWord", "requirements": "install/requirements-wakeword.txt", "mod": "openwakeword"},
+    }
+    packages = {}
+    for key, info in checks.items():
+        try:
+            __import__(info["mod"])
+            installed = True
+        except ImportError:
+            installed = False
+        packages[key] = {
+            "installed": installed,
+            "package": info["package"],
+            "requirements": info["requirements"],
+        }
+    return packages
+
+
 # =============================================================================
 # BACKUP ROUTES
 # =============================================================================
@@ -340,14 +361,30 @@ async def get_continuity_merged_timeline(request: Request, _=Depends(require_log
 
 @router.get("/api/setup/provider-status")
 async def provider_status(request: Request, _=Depends(require_login)):
-    """Check if STT/TTS providers are loaded and ready (not null)."""
+    """Check if STT/TTS providers are loaded and ready (or why they are not)."""
     system = get_system()
     stt_status = "disabled"
     tts_status = "disabled"
+    wakeword_status = "disabled"
+    stt_reason = ""
+    tts_reason = ""
+    wakeword_reason = ""
     stt_provider = getattr(config, 'STT_PROVIDER', 'none')
     tts_provider = getattr(config, 'TTS_PROVIDER', 'none')
+    wakeword_enabled = getattr(config, 'WAKE_WORD_ENABLED', False)
 
-    if stt_provider and stt_provider != 'none':
+    runtime = getattr(system, 'provider_runtime', {}) or {}
+    if runtime.get("stt"):
+        stt_status = runtime["stt"].get("status", stt_status)
+        stt_reason = runtime["stt"].get("reason", "")
+    if runtime.get("tts"):
+        tts_status = runtime["tts"].get("status", tts_status)
+        tts_reason = runtime["tts"].get("reason", "")
+    if runtime.get("wakeword"):
+        wakeword_status = runtime["wakeword"].get("status", wakeword_status)
+        wakeword_reason = runtime["wakeword"].get("reason", "")
+
+    if stt_provider and stt_provider != 'none' and stt_status == "disabled":
         try:
             if hasattr(system, 'whisper_client') and system.whisper_client.is_available():
                 stt_status = "ready"
@@ -356,7 +393,7 @@ async def provider_status(request: Request, _=Depends(require_login)):
         except Exception:
             stt_status = "loading"
 
-    if tts_provider and tts_provider != 'none':
+    if tts_provider and tts_provider != 'none' and tts_status == "disabled":
         try:
             if hasattr(system, 'tts') and hasattr(system.tts, '_provider') and system.tts._provider.is_available():
                 tts_status = "ready"
@@ -365,26 +402,96 @@ async def provider_status(request: Request, _=Depends(require_login)):
         except Exception:
             tts_status = "loading"
 
-    return {"stt": stt_status, "tts": tts_status}
+    if wakeword_enabled and wakeword_status == "disabled":
+        try:
+            ready = (
+                hasattr(system, 'wake_detector') and
+                system.wake_detector is not None and
+                system.wake_detector.__class__.__name__ != 'NullWakeWordDetector'
+            )
+            wakeword_status = "ready" if ready else "loading"
+        except Exception:
+            wakeword_status = "loading"
+
+    return {
+        "stt": stt_status,
+        "tts": tts_status,
+        "wakeword": wakeword_status,
+        "stt_reason": stt_reason,
+        "tts_reason": tts_reason,
+        "wakeword_reason": wakeword_reason,
+        "startup_warnings": getattr(system, 'startup_warnings', []),
+        "web_first": True,
+    }
 
 
 @router.get("/api/setup/check-packages")
 async def check_packages(request: Request, _=Depends(require_login)):
     """Check optional packages. Returns format expected by setup wizard UI."""
-    checks = {
-        "tts": {"package": "Kokoro TTS", "requirements": "install/requirements-tts.txt", "mod": "kokoro"},
-        "stt": {"package": "Faster Whisper", "requirements": "install/requirements-stt.txt", "mod": "faster_whisper"},
-        "wakeword": {"package": "OpenWakeWord", "requirements": "install/requirements-wakeword.txt", "mod": "openwakeword"},
+    return {"packages": _check_optional_packages()}
+
+
+@router.get("/api/system/capabilities")
+async def system_capabilities(request: Request, _=Depends(require_login)):
+    """Summarize what this Sani instance can currently do on this machine."""
+    system = get_system()
+    provider_data = await provider_status(request, _)
+    packages = _check_optional_packages()
+
+    install_tracks = {
+        "web": {
+            "label": "Web",
+            "requirements": ["install/requirements-web.txt"],
+            "summary": "Core web app, chat UI, tools, memory, plugins, and cloud/local LLM access.",
+        },
+        "voice": {
+            "label": "Voice Add-on",
+            "requirements": [
+                "install/requirements-tts.txt",
+                "install/requirements-stt.txt",
+                "install/requirements-wakeword.txt",
+            ],
+            "summary": "Adds local speech recognition, voice synthesis, and wake word support.",
+        },
+        "full": {
+            "label": "Full",
+            "requirements": ["requirements.txt"],
+            "summary": "Everything in one install, including optional integrations and heavier dependencies.",
+        },
     }
-    packages = {}
-    for key, info in checks.items():
-        try:
-            __import__(info["mod"])
-            installed = True
-        except ImportError:
-            installed = False
-        packages[key] = {"installed": installed, "package": info["package"], "requirements": info["requirements"]}
-    return {"packages": packages}
+
+    return {
+        "web_first": True,
+        "packages": packages,
+        "providers": {
+            "stt": {
+                "configured": getattr(config, 'STT_PROVIDER', 'none'),
+                "status": provider_data["stt"],
+                "reason": provider_data.get("stt_reason", ""),
+            },
+            "tts": {
+                "configured": getattr(config, 'TTS_PROVIDER', 'none'),
+                "status": provider_data["tts"],
+                "reason": provider_data.get("tts_reason", ""),
+            },
+            "wakeword": {
+                "configured": "enabled" if getattr(config, 'WAKE_WORD_ENABLED', False) else "disabled",
+                "status": provider_data["wakeword"],
+                "reason": provider_data.get("wakeword_reason", ""),
+            },
+        },
+        "startup_warnings": provider_data.get("startup_warnings", []),
+        "install_tracks": install_tracks,
+        "running": {
+            "privacy_mode": bool(getattr(config, 'PRIVACY_MODE', False)),
+            "managed": bool(getattr(config, 'SANI_MANAGED', False) or getattr(config, 'SAPPHIRE_MANAGED', False)),
+            "docker": bool(getattr(config, 'SANI_DOCKER', False) or getattr(config, 'SAPPHIRE_DOCKER', False)),
+        },
+        "identity": {
+            "app": "Sani",
+            "version": os.environ.get("APP_VERSION", ""),
+        }
+    }
 
 
 @router.get("/api/setup/wizard-step")

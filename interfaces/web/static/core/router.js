@@ -6,8 +6,7 @@ let currentView = null;
 
 // View groups: views that share a nav parent
 const VIEW_GROUPS = {
-    personas: ['personas', 'prompts', 'toolsets', 'spices'],
-    settings: ['settings', 'help']
+    personas: ['personas', 'prompts', 'toolsets', 'spices']
 };
 
 // Reverse lookup: view -> group parent
@@ -74,13 +73,10 @@ export function initRouter(defaultView = 'chat') {
     // Listen for hash changes (back/forward)
     window.addEventListener('hashchange', () => {
         const hash = location.hash.slice(1);
-        // Support nested routes like #apps/mission-control → switch to 'apps' view
-        const baseView = hash.split('/')[0];
-        if (baseView && views[baseView]) switchView(baseView);
+        if (hash && views[hash]) switchView(hash);
     });
 
     // Initial route
     const hash = location.hash.slice(1);
-    const baseView = hash.split('/')[0];
-    switchView((baseView && views[baseView]) ? baseView : defaultView);
+    switchView((hash && views[hash]) ? hash : defaultView);
 }

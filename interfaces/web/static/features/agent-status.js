@@ -8,7 +8,6 @@ let initialized = false;
 let agents = new Map(); // id -> {name, status, mission, chat_name}
 let pendingAgentReport = null;
 let pendingAgentChat = null;
-let draining = false;
 let workspaces = new Map(); // project -> {type, url, running}
 
 const STATUS_COLORS = {
@@ -221,8 +220,7 @@ function stopPolling() {
 }
 
 async function drainAgentReport() {
-    if (!pendingAgentReport || draining) return;
-    draining = true;
+    if (!pendingAgentReport) return;
     try {
         const activeChat = getActiveChat();
         if (pendingAgentChat && pendingAgentChat !== activeChat) {
@@ -234,8 +232,9 @@ async function drainAgentReport() {
             console.log('[Agents] Still processing, will retry on ai_typing_end');
             return;
         }
-        if (!pendingAgentReport) return; // re-check after awaits
         const report = pendingAgentReport;
+        pendingAgentReport = null;
+        pendingAgentChat = null;
         console.log('[Agents] Sending auto-return report to chat');
 
         // Preserve user's in-progress typing
@@ -246,10 +245,6 @@ async function drainAgentReport() {
         const { triggerSendWithText } = await import('../handlers/send-handlers.js');
         await triggerSendWithText(report);
 
-        // Only clear after successful send
-        pendingAgentReport = null;
-        pendingAgentChat = null;
-
         // Restore what the user was typing
         if (savedText && input) {
             input.value = savedText;
@@ -257,9 +252,8 @@ async function drainAgentReport() {
         }
     } catch (err) {
         console.error('[Agents] Auto-return failed:', err);
-        // Don't clear pendingAgentReport — will retry on next trigger
-    } finally {
-        draining = false;
+        pendingAgentReport = null;
+        pendingAgentChat = null;
     }
 }
 
@@ -329,20 +323,6 @@ export function initAgentStatus() {
         console.log('[Agents] Chat switched — checking if report can drain');
         setTimeout(() => drainAgentReport(), 500);
     });
-
-    // Server restart — wipe stale pills, re-poll for actual state
-    eventBus.on('server_restarted', () => {
-        agents.clear();
-        workspaces.clear();
-        renderPills();
-        poll();
-    });
-
-    // Safety net: periodically retry stuck reports (e.g. user never returns to agent's chat)
-    setInterval(() => {
-        if (!pendingAgentReport) return;
-        drainAgentReport();
-    }, 15000);
 
     poll();
 }

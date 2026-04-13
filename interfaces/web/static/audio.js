@@ -1,7 +1,6 @@
 // audio.js - Audio lifecycle with native WAV recording (no server-side ffmpeg needed)
 import * as ui from './ui.js';
 import * as api from './api.js';
-import { dispatch, Events } from './core/event-bus.js';
 
 let audioContext, mediaStream, sourceNode, processorNode;
 let audioChunks = [];
@@ -170,8 +169,6 @@ export const playText = async (txt, cacheKey = null) => {
             console.error('Audio error:', e);
             isStreaming = false;
             ui.hideStatus();
-            cleanup();
-            ui.showToast('Audio playback failed — check TTS provider', 'error');
         };
 
         await player.play();
@@ -180,9 +177,7 @@ export const playText = async (txt, cacheKey = null) => {
         isStreaming = false;
         ui.hideStatus();
         if (!e.message?.includes('cancelled') && !e.message?.includes('aborted') &&
-            !e.message?.includes('interrupted') && !e.message?.includes('removed') &&
-            !e.name?.includes('NotAllowedError') && !e.name?.includes('AbortError') &&
-            !e.message?.includes('autoplay')) {
+            !e.name?.includes('NotAllowedError') && !e.message?.includes('autoplay')) {
             ui.showToast(`Audio error: ${e.message}`, 'error');
         }
     }
@@ -325,10 +320,6 @@ const startRec = async () => {
 
 const stopRec = async () => {
     if (!audioContext || audioChunks.length === 0) {
-        // Clean up resources even if no audio was captured (quick tap)
-        try { sourceNode?.disconnect(); processorNode?.disconnect(); } catch {}
-        if (audioContext) { try { audioContext.close(); } catch {} audioContext = null; }
-        if (mediaStream) { mediaStream.getTracks().forEach(t => t.stop()); mediaStream = null; }
         return null;
     }
     
@@ -370,8 +361,7 @@ const signalMicActive = (active) => {
     fetch('/api/mic/active', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrf },
-        body: JSON.stringify({ active }),
-        keepalive: !active,  // keepalive on deactivation — survives tab close/navigation
+        body: JSON.stringify({ active })
     }).catch(() => {});
 };
 
@@ -384,7 +374,6 @@ export const handlePress = async (btn) => {
         ui.showStatus();
         ui.updateStatus('Recording...');
         signalMicActive(true);
-        dispatch(Events.STT_RECORDING_START, { source: 'browser' });
     }
 };
 
@@ -393,11 +382,9 @@ export const handleRelease = async (btn, triggerSendFn) => {
     isRec = false;
     const blob = await stopRec();
     btn.classList.remove('recording');
-    dispatch(Events.STT_RECORDING_END, { source: 'browser' });
-
+    
     if (blob && blob.size > 1000) {
         ui.updateStatus('Transcribing...');
-        dispatch(Events.STT_PROCESSING, { source: 'browser' });
         try {
             const response = await api.postAudio(blob);
             // /api/transcribe manages _web_active in its own finally block

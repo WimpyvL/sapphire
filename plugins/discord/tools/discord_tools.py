@@ -16,22 +16,8 @@ EMOJI = "🎮"
 
 # Set by executor when processing a daemon event — auto-reply target
 _reply_channel_id = ContextVar('discord_reply_channel_id', default=None)
-# Per-account send counter: incremented when discord_send_message runs.
-# The daemon snapshots the counter before emitting; the reply handler checks if it changed.
-# This avoids the race where a second message's clear() wipes the first message's set().
-import threading
-_send_counts: dict = {}  # {account_name: int}
-_send_counts_lock = threading.Lock()
-
-def get_send_count(account_name: str) -> int:
-    """Get current send count for an account."""
-    with _send_counts_lock:
-        return _send_counts.get(account_name, 0)
-
-def increment_send_count(account_name: str):
-    """Increment send count after a tool-initiated send."""
-    with _send_counts_lock:
-        _send_counts[account_name] = _send_counts.get(account_name, 0) + 1
+# Set to True when discord_send_message runs — prevents double-post from auto_reply
+_message_sent = ContextVar('discord_message_sent', default=False)
 
 TOOLS = [
     {
@@ -87,7 +73,7 @@ TOOLS = [
     }
 ]
 
-AVAILABLE_FUNCTIONS = [t["function"]["name"] for t in TOOLS]
+AVAILABLE_FUNCTIONS = {t["function"]["name"] for t in TOOLS}
 
 
 def _get_account():
@@ -251,9 +237,7 @@ def _send_message(client, loop, channel_ref=None, text=""):
 
     future = asyncio.run_coroutine_threadsafe(_send(), loop)
     channel_name = future.result(timeout=10)
-    account = _get_account()
-    if account:
-        increment_send_count(account)
+    _message_sent.set(True)
 
     return f"Message sent to #{channel_name}.", True
 

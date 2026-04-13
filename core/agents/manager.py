@@ -92,16 +92,17 @@ class AgentManager:
             agent_id = uuid.uuid4().hex[:8]
             name = self._next_name(agent_type)
 
-            worker = type_info['factory'](
-                agent_id=agent_id,
-                name=name,
-                mission=mission,
-                chat_name=chat_name,
-                on_complete=self._check_batch_complete,
-                **kwargs
-            )
-            worker._agent_type = agent_type
-            worker.status = 'running'
+        worker = type_info['factory'](
+            agent_id=agent_id,
+            name=name,
+            mission=mission,
+            chat_name=chat_name,
+            on_complete=self._check_batch_complete,
+            **kwargs
+        )
+        worker._agent_type = agent_type
+
+        with self._lock:
             self._agents[agent_id] = worker
 
         worker.start()
@@ -177,15 +178,15 @@ class AgentManager:
                 dismissed_ids.append((a.id, a.name))
                 self._agents.pop(a.id, None)
 
-        # Publish events OUTSIDE lock to prevent deadlock with EventBus
-        for aid, aname in dismissed_ids:
-            publish(Events.AGENT_DISMISSED, {'id': aid, 'name': aname})
+            # Publish events inside lock to prevent new agents from racing
+            for aid, aname in dismissed_ids:
+                publish(Events.AGENT_DISMISSED, {'id': aid, 'name': aname})
 
-        publish(Events.AGENT_BATCH_COMPLETE, {
-            'chat_name': chat_name,
-            'report': report,
-            'agent_count': len(dismissed_ids),
-        })
+            publish(Events.AGENT_BATCH_COMPLETE, {
+                'chat_name': chat_name,
+                'report': report,
+                'agent_count': len(dismissed_ids),
+            })
 
         logger.info(f"Agent batch complete for chat '{chat_name}': {len(dismissed_ids)} agents reported")
 

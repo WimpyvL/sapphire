@@ -10,6 +10,7 @@ import logging
 import threading
 import time
 from pathlib import Path
+from core.identity import env_get, env_flag
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +26,7 @@ class SettingsManager:
         self._config = {}
         self._runtime = {}  # Non-persisted runtime overrides (survive file reload)
         self._reload_callbacks = {}
-        self._lock = threading.RLock()
+        self._lock = threading.Lock()
         
         # File watcher state
         self._watcher_thread = None
@@ -67,7 +68,7 @@ class SettingsManager:
         config_objects = {
             'LLM_PRIMARY', 'LLM_FALLBACK', 'GENERATION_DEFAULTS',
             'FASTER_WHISPER_VAD_PARAMETERS', 'LLM_PROVIDERS',
-            'LLM_CUSTOM_PROVIDERS', 'MODEL_GENERATION_PROFILES'
+            'MODEL_GENERATION_PROFILES'
         }
         return key in config_objects
     
@@ -93,7 +94,7 @@ class SettingsManager:
         api_host = self._defaults.get('WEB_UI_HOST', '127.0.0.1')
         if api_host == '0.0.0.0':
             api_host = '127.0.0.1'  # localhost for internal requests
-        api_port = self._defaults.get('WEB_UI_PORT', 8073)
+        api_port = self._defaults.get('WEB_UI_PORT', 3004)
         api_proto = 'https' if self._defaults.get('WEB_UI_SSL_ADHOC', False) else 'http'
         self._defaults['API_URL'] = f"{api_proto}://{api_host}:{api_port}"
         
@@ -104,7 +105,7 @@ class SettingsManager:
             platform_devices = self._defaults.get('RECORDER_PREFERRED_DEVICES_LINUX', ['default'])
         self._defaults['RECORDER_PREFERRED_DEVICES'] = platform_devices
         
-        # Auth is now handled entirely by core/setup.py using ~/.config/sapphire/secret_key or %APPDATA%\Sapphire\
+        # Auth is now handled entirely by core/setup.py using the platform config dir.
         # Remove legacy env var handling
     
     def _load_user_settings(self):
@@ -129,79 +130,24 @@ class SettingsManager:
             logger.info("No user settings found, using defaults")
             self._user = {}
     
-    def _migrate_providers(self):
-        """Migrate non-core providers from LLM_PROVIDERS to LLM_CUSTOM_PROVIDERS."""
-        if 'LLM_PROVIDERS' not in self._user:
-            return
-        providers = self._user.get('LLM_PROVIDERS', {})
-        custom = self._user.get('LLM_CUSTOM_PROVIDERS', {})
-
-        core_keys = {'claude', 'openai', 'gemini'}
-        template_map = {
-            'fireworks': 'openai', 'openai': 'openai', 'claude': 'claude',
-            'anthropic': 'anthropic', 'responses': 'responses',
-            'gemini': 'gemini',
-        }
-        migrated = False
-
-        for key in list(providers.keys()):
-            if key in core_keys:
-                continue
-            config = providers.pop(key)
-            ptype = config.get('provider', 'openai')
-            config['template'] = template_map.get(ptype, 'openai')
-            config.setdefault('display_name', config.get('display_name', key))
-            # Skip empty/unconfigured slots
-            if key == 'other' and not config.get('base_url'):
-                migrated = True
-                continue
-            if key == 'responses' and not config.get('base_url'):
-                migrated = True
-                continue
-            custom[key] = config
-            migrated = True
-
-        if migrated:
-            self._user['LLM_PROVIDERS'] = providers
-            self._user['LLM_CUSTOM_PROVIDERS'] = custom
-            # Update fallback order — keep all keys
-            logger.info(f"[SETTINGS] Migrated {len(custom)} providers to LLM_CUSTOM_PROVIDERS")
-            self.save()
-
     def _merge_settings(self):
         """Merge defaults with user overrides, deep-merging LLM_PROVIDERS"""
-        # Run migration before merge
-        self._migrate_providers()
-
         self._config = {**self._defaults, **self._user}
 
-        # Deep-merge LLM_PROVIDERS (core) so new provider fields from defaults aren't lost
+        # Deep-merge LLM_PROVIDERS so new provider fields from defaults aren't lost
         if 'LLM_PROVIDERS' in self._defaults and 'LLM_PROVIDERS' in self._user:
             merged_providers = {}
             for key, default_config in self._defaults['LLM_PROVIDERS'].items():
                 if key in self._user['LLM_PROVIDERS']:
+                    # Merge: defaults first, then user overrides
                     merged_providers[key] = {**default_config, **self._user['LLM_PROVIDERS'][key]}
                 else:
                     merged_providers[key] = default_config
-            # Include any user-added core providers not in defaults (shouldn't happen but safe)
+            # Include any user-added providers not in defaults
             for key, user_config in self._user['LLM_PROVIDERS'].items():
                 if key not in merged_providers:
                     merged_providers[key] = user_config
             self._config['LLM_PROVIDERS'] = merged_providers
-
-        # Deep-merge LLM_CUSTOM_PROVIDERS — defaults + user
-        default_custom = self._defaults.get('LLM_CUSTOM_PROVIDERS', {})
-        user_custom = self._user.get('LLM_CUSTOM_PROVIDERS', {})
-        merged_custom = {}
-        for key, default_config in default_custom.items():
-            if key in user_custom:
-                merged_custom[key] = {**default_config, **user_custom[key]}
-            else:
-                merged_custom[key] = default_config
-        for key, user_config in user_custom.items():
-            if key not in merged_custom:
-                merged_custom[key] = user_config
-        self._config['LLM_CUSTOM_PROVIDERS'] = merged_custom
 
         # Deep-merge MODEL_GENERATION_PROFILES so new model profiles from defaults aren't lost
         if 'MODEL_GENERATION_PROFILES' in self._defaults and 'MODEL_GENERATION_PROFILES' in self._user:
@@ -212,22 +158,27 @@ class SettingsManager:
             self._config['PRIVACY_MODE'] = self._config.get('START_IN_PRIVACY_MODE', False)
 
         # Managed mode: lock down for Docker resale
-        if os.environ.get('SAPPHIRE_MANAGED'):
+        if env_flag('SANI_MANAGED', 'SAPPHIRE_MANAGED'):
             providers = self._config.get('LLM_PROVIDERS', {})
             providers.pop('lmstudio', None)
             self._config['PRIVACY_MODE'] = False
             self._config['WAKE_WORD_ENABLED'] = False
-            if not os.environ.get('SAPPHIRE_UNRESTRICTED'):
+            if not env_flag('SANI_UNRESTRICTED', 'SAPPHIRE_UNRESTRICTED'):
                 self._config['ALLOW_UNSIGNED_PLUGINS'] = False
 
         # Environment variable overrides (Docker/managed deployments)
-        _env_overrides = [
-            'STT_PROVIDER', 'TTS_PROVIDER', 'EMBEDDING_PROVIDER',
-            'SAPPHIRE_ROUTER_URL', 'SAPPHIRE_ROUTER_TENANT_ID',
-            'WEB_UI_HOST', 'WEB_UI_PORT', 'WAKE_WORD_ENABLED',
-        ]
-        for key in _env_overrides:
-            val = os.environ.get(key)
+        _env_overrides = {
+            'STT_PROVIDER': ('STT_PROVIDER',),
+            'TTS_PROVIDER': ('TTS_PROVIDER',),
+            'EMBEDDING_PROVIDER': ('EMBEDDING_PROVIDER',),
+            'SAPPHIRE_ROUTER_URL': ('SANI_ROUTER_URL', 'SAPPHIRE_ROUTER_URL'),
+            'SAPPHIRE_ROUTER_TENANT_ID': ('SANI_ROUTER_TENANT_ID', 'SAPPHIRE_ROUTER_TENANT_ID'),
+            'WEB_UI_HOST': ('WEB_UI_HOST',),
+            'WEB_UI_PORT': ('WEB_UI_PORT',),
+            'WAKE_WORD_ENABLED': ('WAKE_WORD_ENABLED',),
+        }
+        for key, aliases in _env_overrides.items():
+            val = env_get(*aliases)
             if val is not None:
                 # Coerce booleans and ints
                 if val.lower() in ('true', 'false'):
@@ -275,15 +226,9 @@ class SettingsManager:
                 logger.error(f"Failed to create example file: {e}")
     
     def get(self, key, default=None):
-        """Get a setting value (returns copies of mutable types to prevent reference leaks)"""
+        """Get a setting value"""
         with self._lock:
-            val = self._config.get(key, default)
-            if isinstance(val, dict):
-                import copy
-                return copy.deepcopy(val)
-            if isinstance(val, list):
-                return val.copy()
-            return val
+            return self._config.get(key, default)
     
     # Settings locked in managed mode (env var only)
     MANAGED_LOCKED_KEYS = {
@@ -295,13 +240,13 @@ class SettingsManager:
     }
 
     def is_managed(self):
-        return bool(os.environ.get('SAPPHIRE_MANAGED'))
+        return env_flag('SANI_MANAGED', 'SAPPHIRE_MANAGED')
 
     def is_docker(self):
-        return bool(os.environ.get('SAPPHIRE_DOCKER'))
+        return env_flag('SANI_DOCKER', 'SAPPHIRE_DOCKER')
 
     def is_unrestricted(self):
-        return bool(os.environ.get('SAPPHIRE_UNRESTRICTED'))
+        return env_flag('SANI_UNRESTRICTED', 'SAPPHIRE_UNRESTRICTED')
 
     def is_locked(self, key):
         if not self.is_managed():
@@ -355,13 +300,12 @@ class SettingsManager:
         """Set multiple settings at once"""
         for key, value in settings_dict.items():
             self.set(key, value, persist=False)  # Don't save each individually
-
+        
         if persist:
-            with self._lock:
-                self._user.update(settings_dict)
-                for key in settings_dict:
-                    self._runtime.pop(key, None)  # Now persisted
-                self.save()
+            self._user.update(settings_dict)
+            for key in settings_dict:
+                self._runtime.pop(key, None)  # Now persisted
+            self.save()
 
             # Track which settings require restart
             if hasattr(self, '_pending_restart_keys'):
@@ -481,14 +425,17 @@ class SettingsManager:
             self._runtime = {}  # Clear runtime overrides too
             self._merge_settings()
             
-            # Atomically replace the settings file
+            # Actually delete/recreate the settings file
             user_path = self.BASE_DIR / 'user' / 'settings.json'
             try:
+                if user_path.exists():
+                    user_path.unlink()
+                    logger.info(f"Deleted user settings file: {user_path}")
+                
+                # Write minimal fresh file
                 user_path.parent.mkdir(exist_ok=True)
-                tmp_path = user_path.with_suffix('.json.tmp')
-                with open(tmp_path, 'w', encoding='utf-8') as f:
+                with open(user_path, 'w', encoding='utf-8') as f:
                     json.dump({"_comment": "Your custom settings - edit freely or use web UI"}, f, indent=2)
-                tmp_path.replace(user_path)
                 
                 self._update_mtime()
                 logger.info("Settings reset to defaults")
@@ -604,7 +551,7 @@ class SettingsManager:
             'LLM_MAX_HISTORY', 'CONTEXT_LIMIT',
             'FORCE_THINKING', 'THINKING_PREFILL',
             'CLAUDE_THINKING_ENABLED', 'CLAUDE_THINKING_BUDGET',
-            'LLM_PROVIDERS', 'LLM_CUSTOM_PROVIDERS', 'LLM_FALLBACK_ORDER', 'LLM_REQUEST_TIMEOUT',
+            'LLM_PROVIDERS', 'LLM_FALLBACK_ORDER', 'LLM_REQUEST_TIMEOUT',
             # SOCKS can be hot-reloaded - session cache is cleared on change
             'SOCKS_ENABLED', 'SOCKS_HOST', 'SOCKS_PORT', 'SOCKS_TIMEOUT',
             # Privacy mode is runtime-only, always hot

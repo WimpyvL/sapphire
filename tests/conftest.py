@@ -113,7 +113,7 @@ def prompts_dir(tmp_path):
     
     monoliths = {
         "_comment": "Test monoliths",
-        "default": "You are a helpful AI assistant named Sapphire."
+        "default": "You are a helpful AI assistant named Sani."
     }
     (prompts_path / "prompt_monoliths.json").write_text(
         json.dumps(monoliths), encoding='utf-8'

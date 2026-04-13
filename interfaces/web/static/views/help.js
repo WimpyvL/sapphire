@@ -258,7 +258,7 @@ export default {
         renderSidebar();
 
         // Check for deep-link: #help/AGENTS or #help/integrations/DISCORD
-        const hash = location.hash.replace(/^#help\/?/, '').replace(/^#/, '');
+        const hash = location.hash.replace(/^#help\/?/, '');
         // Check for _viewSelect (other views linking here)
         const target = window._viewSelect || (hash ? `${hash}.md` : null);
         if (window._viewSelect) delete window._viewSelect;

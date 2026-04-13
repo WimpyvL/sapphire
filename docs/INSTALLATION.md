@@ -130,12 +130,12 @@ Use cloud APIs for stronger models. Your conversations go to external servers.
 |----------|-----------|-------------|
 | Claude (Anthropic) | Complex tasks, conversation | [console.anthropic.com](https://console.anthropic.com/) |
 | OpenAI | GPT models, well-supported | [platform.openai.com](https://platform.openai.com/) |
-| Gemini (Google) | Fast, multimodal | [aistudio.google.com](https://aistudio.google.com/) |
+| Fireworks | Fast, many open models | [fireworks.ai](https://fireworks.ai/) |
 
 Set your API key via environment variable or in the setup wizard:
 - `ANTHROPIC_API_KEY` for Claude
 - `OPENAI_API_KEY` for OpenAI
-- `GOOGLE_API_KEY` for Gemini
+- `FIREWORKS_API_KEY` for Fireworks
 
 Sapphire automatically falls back between enabled providers if one fails.
 
@@ -147,7 +147,7 @@ Sapphire automatically falls back between enabled providers if one fails.
 python main.py
 ```
 
-1. Open https://localhost:8073
+1. Open https://localhost:3004
 2. Create a password (secures web UI and API)
 3. Complete setup wizard (LLM, voice, audio)
 4. Send a test message
@@ -294,13 +294,13 @@ OPTIONAL FEATURES (only for minimal install):
 
 LLM OPTIONS:
 - Local: LM Studio on port 1234 (private, free)
-- Cloud: Claude/OpenAI/Gemini (set API key via env var or Settings)
+- Cloud: Claude/OpenAI/Fireworks (set API key via env var or Settings)
 - Setup wizard configures on first run
 - Auto-fallback between enabled providers
 
 FIRST RUN:
 1. python main.py
-2. Open https://localhost:8073
+2. Open https://localhost:3004
 3. Create password
 4. Complete setup wizard
 5. Send test message

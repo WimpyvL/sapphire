@@ -5,6 +5,7 @@ import threading
 import time
 from datetime import datetime
 from pathlib import Path
+from core.identity import PRODUCT_NAME, DEFAULT_PROMPT
 
 logger = logging.getLogger(__name__)
 
@@ -131,7 +132,7 @@ class PromptManager:
         
         try:
             from core.settings_manager import settings
-            ai_name = 'Sapphire'
+            ai_name = PRODUCT_NAME
             user_name = settings.get('DEFAULT_USERNAME', 'Human Protagonist')
             # Sanitize curly brackets to prevent template injection
             ai_name = ai_name.replace('{', '').replace('}', '')
@@ -211,7 +212,7 @@ class PromptManager:
         prompt_parts = []
         
         # Add character (main character description)
-        character_key = components.get('character', 'sapphire')
+        character_key = components.get('character', DEFAULT_PROMPT)
         if 'character' in self._components:
             if character_key in self._components['character']:
                 prompt_parts.append(self._components['character'][character_key])
@@ -272,10 +273,8 @@ class PromptManager:
             data['scenario_presets'] = self._scenario_presets
 
             # Save back
-            tmp_path = target_path.with_suffix('.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
+            with open(target_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
-            tmp_path.replace(target_path)
             logger.info(f"Saved scenario presets to {target_path}")
     
     def save_monoliths(self):
@@ -304,10 +303,8 @@ class PromptManager:
                     data[name] = {'content': str(mono), 'privacy_required': False}
 
             # Save
-            tmp_path = target_path.with_suffix('.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
+            with open(target_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
-            tmp_path.replace(target_path)
             logger.info(f"Saved monoliths to {target_path}")
     
     def save_components(self):
@@ -326,10 +323,8 @@ class PromptManager:
             data['components'] = self._components
 
             # Save back
-            tmp_path = target_path.with_suffix('.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
+            with open(target_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2)
-            tmp_path.replace(target_path)
             logger.info(f"Saved components to {target_path}")
     
     def save_spices(self):
@@ -345,10 +340,8 @@ class PromptManager:
                 data["_disabled_categories"] = sorted(list(self._disabled_categories))
             data.update(self._spices)
 
-            tmp_path = target_path.with_suffix('.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
+            with open(target_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, indent=2, ensure_ascii=False)
-            tmp_path.replace(target_path)
             logger.info(f"Saved spices to {target_path}")
     
     def is_category_enabled(self, category: str) -> bool:

@@ -210,7 +210,7 @@ Webhooks let external services trigger Sapphire via HTTP. Any service that can s
 - **Path** — the URL path (e.g. `deploy` → `/api/events/webhook/deploy`)
 - **Method** — GET, POST, or PUT
 
-**Webhook security:** Every webhook task gets an auto-generated secret. Callers must include the secret in the `x-webhook-secret` header, or use GitHub-style HMAC signatures (`x-hub-signature-256`). The secret is shown in the task's trigger config after creation. For additional security, use unique/random paths (e.g. `github-abc123` instead of `github`).
+**The webhook URL is unauthenticated** — anyone with the URL can trigger it. Use unique/random paths for security (e.g. `github-abc123` instead of `github`).
 
 ### Payload Handling
 
@@ -233,16 +233,15 @@ Voice: Off
 
 **GitHub webhook config:**
 ```
-URL: https://your-sapphire:8073/api/events/webhook/github-deploy
+URL: https://your-sani:3004/api/events/webhook/github-deploy
 Content-Type: application/json
 Events: Deployments
 ```
 
 **Test it:**
 ```bash
-curl -X POST https://localhost:8073/api/events/webhook/github-deploy \
+curl -X POST https://localhost:3004/api/events/webhook/github-deploy \
   -H "Content-Type: application/json" \
-  -H "x-webhook-secret: YOUR_SECRET_HERE" \
   -d '{"service": "api", "status": "success", "version": "v2.1.0"}'
 ```
 
@@ -258,9 +257,8 @@ Knowledge scope: incidents
 
 **Trigger from monitoring tool:**
 ```bash
-curl -X POST https://your-sapphire:8073/api/events/webhook/monitor-alert-x7k9 \
+curl -X POST https://your-sani:3004/api/events/webhook/monitor-alert-x7k9 \
   -H "Content-Type: application/json" \
-  -H "x-webhook-secret: YOUR_SECRET_HERE" \
   -d '{"host": "db-primary", "alert": "disk usage 92%", "level": "warning"}'
 ```
 
@@ -276,8 +274,7 @@ Voice: On
 
 **Trigger from cron or IFTTT:**
 ```bash
-curl -H "x-webhook-secret: YOUR_SECRET_HERE" \
-  "https://your-sapphire:8073/api/events/webhook/weather-update?city=Austin&units=imperial"
+curl "https://your-sani:3004/api/events/webhook/weather-update?city=Austin&units=imperial"
 ```
 
 ### Example: Home Assistant Event

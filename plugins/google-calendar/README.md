@@ -52,10 +52,10 @@ This is the step Google's error messages love to be vague about.
 - Under **Authorized redirect URIs**, add your Sapphire callback URL:
 
 ```
-https://localhost:8073/api/plugin/google-calendar/callback
+https://localhost:3004/api/plugin/google-calendar/callback
 ```
 
-Replace `localhost:8073` with your actual Sapphire host and port if different.
+Replace `localhost:3004` with your actual Sani host and port if different.
 
 - Click **Create**
 - Copy the **Client ID** and **Client Secret** — you'll need these next

@@ -51,23 +51,19 @@ async def agent_status(chat: str = Query('', description="Filter by chat name"),
 @router.get("/api/agents/providers")
 async def agent_providers(_=Depends(require_login)):
     import config as cfg
-    from core.chat.llm_providers import provider_registry, PROVIDER_METADATA
-    core_keys = set(provider_registry.get_core_keys())
+    from core.chat.llm_providers import PROVIDER_METADATA
     providers = []
-    all_providers = {**getattr(cfg, 'LLM_PROVIDERS', {}), **getattr(cfg, 'LLM_CUSTOM_PROVIDERS', {})}
-    for key, pconf in all_providers.items():
+    for key, pconf in getattr(cfg, 'LLM_PROVIDERS', {}).items():
         if not pconf.get('enabled'):
             continue
-        is_core = key in core_keys
         meta = PROVIDER_METADATA.get(key, {})
-        models = meta.get('model_options') or {} if is_core else {}
+        models = meta.get('model_options') or {}
         current = pconf.get('model', '')
         providers.append({
             'key': key,
             'name': pconf.get('display_name', meta.get('display_name', key)),
             'current_model': current,
             'models': models,
-            'is_core': is_core,
         })
     return {"providers": providers}
 

@@ -26,7 +26,11 @@ const PROVIDER_MAP = {
 function renderProviderCard(icon, title, desc, settingKey, currentValue, providers) {
   const isActive = currentValue && currentValue !== 'none';
   const options = Object.entries(providers)
-    .map(([val, def]) => `<option value="${val}" ${val === currentValue ? 'selected' : ''}>${def.label}</option>`)
+    .map(([val, def]) => {
+      const missingPackage = def.needsPackage && packageStatus[def.needsPackage] && !packageStatus[def.needsPackage].installed;
+      const label = missingPackage ? `${def.label} (install required)` : def.label;
+      return `<option value="${val}" ${val === currentValue ? 'selected' : ''} ${missingPackage ? 'disabled' : ''}>${label}</option>`;
+    })
     .join('');
 
   const providerDef = providers[currentValue] || providers.none;
@@ -77,7 +81,7 @@ export default {
           <span class="feature-icon">\uD83C\uDFB5</span>
           <div class="feature-info">
             <h4>Wake Word</h4>
-            <p>Say "Hey Sapphire" to start talking anytime</p>
+            <p>Say "Hey Sani" to start talking anytime</p>
           </div>
           <label class="feature-toggle">
             <input type="checkbox" data-setting="WAKE_WORD_ENABLED" ${wakewordEnabled ? 'checked' : ''}>
@@ -91,9 +95,19 @@ export default {
     `;
 
     return `
-      ${renderProviderCard('\uD83C\uDFA4', 'Speech Recognition', 'Talk to Sapphire using your voice', 'STT_PROVIDER', sttProvider, STT_PROVIDERS)}
+      <div class="feature-card enabled" data-feature="voice-model">
+        <div class="feature-card-header">
+          <span class="feature-icon">🛡️</span>
+          <div class="feature-info">
+            <h4>Web-First Startup</h4>
+            <p>Sani always brings the web app up first. Voice is optional and can be layered on without taking the system down.</p>
+          </div>
+        </div>
+      </div>
 
-      ${renderProviderCard('\uD83D\uDD0A', 'Voice Responses', 'Sapphire speaks back to you', 'TTS_PROVIDER', ttsProvider, TTS_PROVIDERS)}
+        ${renderProviderCard('\uD83C\uDFA4', 'Speech Recognition', 'Talk to Sani using your voice', 'STT_PROVIDER', sttProvider, STT_PROVIDERS)}
+
+        ${renderProviderCard('\uD83D\uDD0A', 'Voice Responses', 'Sani speaks back to you', 'TTS_PROVIDER', ttsProvider, TTS_PROVIDERS)}
 
       ${wakewordCard}
     `;
@@ -112,13 +126,23 @@ export default {
         const providerDef = providers[value] || {};
         const isLocal = !!providerDef.needsPackage;
 
+        if (providerDef.needsPackage && packageStatus[providerDef.needsPackage] && !packageStatus[providerDef.needsPackage].installed) {
+          this.showGlobalStatus(
+            container,
+            `${providerDef.label} is not installed yet. Sani stays fully usable in web-only mode until you add that package.`,
+            'warning'
+          );
+          e.target.value = settings[settingKey] || 'none';
+          return;
+        }
+
         // Show download status for local providers
         if (isLocal) {
           const pkgStatus = card.querySelector('.package-status');
           if (pkgStatus) {
             pkgStatus.className = 'package-status checking';
             pkgStatus.dataset.downloading = 'true';
-            pkgStatus.innerHTML = `<span class="spinner">&midcir;</span> Downloading ${providerDef.downloadLabel || 'models'}, please wait...`;
+            pkgStatus.innerHTML = `<span class="spinner">&midcir;</span> Activating ${providerDef.downloadLabel || 'models'} while Sani stays online...`;
           }
         }
 
@@ -142,6 +166,7 @@ export default {
           updateScene();
         } catch (err) {
           console.error('Failed to update provider:', err);
+          this.showGlobalStatus(container, `Could not switch ${providerDef.label || settingKey}. Sani kept the previous setting.`, 'error');
           e.target.value = settings[settingKey] || 'none';
         }
       });
@@ -198,6 +223,7 @@ export default {
           updateScene();
         } catch (err) {
           console.error('Failed to update setting:', err);
+          this.showGlobalStatus(container, 'Could not update that voice setting. Sani kept the previous state.', 'error');
           e.target.checked = !enabled;
           if (needsDownload && pkgStatus) {
             delete pkgStatus.dataset.downloading;
@@ -230,7 +256,7 @@ export default {
     if (providerDef.needsPackage) {
       card.insertAdjacentHTML('beforeend',
         `<div class="package-status checking" data-package="${providerDef.needsPackage}" data-downloading="true">
-          <span class="spinner">&midcir;</span> Downloading ${providerDef.downloadLabel || providerDef.label}, please wait...
+          <span class="spinner">&midcir;</span> Activating ${providerDef.downloadLabel || providerDef.label} while Sani stays online...
         </div>`);
     }
     if (providerDef.needsKey) {
@@ -246,6 +272,7 @@ export default {
   _pollProviderReady(container, settingKey, providerDef) {
     // Poll provider-status endpoint until the provider reports ready
     const statusKey = settingKey === 'STT_PROVIDER' ? 'stt' : 'tts';
+    const reasonKey = settingKey === 'STT_PROVIDER' ? 'stt_reason' : 'tts_reason';
     const pkgKey = providerDef.needsPackage;
     let attempts = 0;
     const maxAttempts = 120; // 6 minutes at 3s intervals
@@ -264,6 +291,21 @@ export default {
           }
           return;
         }
+        if (status[statusKey] === 'error') {
+          const statusEl = container.querySelector(`[data-package="${pkgKey}"]`);
+          const reason = status[reasonKey] || `${providerDef.label || 'Provider'} failed to initialize`;
+          if (statusEl) {
+            delete statusEl.dataset.downloading;
+            statusEl.className = 'package-status not-installed';
+            statusEl.innerHTML = `<span class="status-icon">\u2717</span> ${reason}`;
+          }
+          this.showGlobalStatus(
+            container,
+            `Sani stayed online, but ${providerDef.label || 'that provider'} could not start. Keep using the web UI and retry later.`,
+            'warning'
+          );
+          return;
+        }
       } catch (e) {
         // Network error — keep polling
       }
@@ -275,7 +317,7 @@ export default {
         if (statusEl) {
           delete statusEl.dataset.downloading;
           statusEl.className = 'package-status not-installed';
-          statusEl.innerHTML = `<span class="status-icon">\u2717</span> Download timed out — try restarting Sapphire`;
+            statusEl.innerHTML = `<span class="status-icon">\u2717</span> Download timed out — try restarting Sani`;
         }
       }
     };
@@ -287,6 +329,16 @@ export default {
   async loadPackageStatus(container) {
     try {
       packageStatus = await checkPackages();
+
+      container.querySelectorAll('.provider-select').forEach(select => {
+        const providers = PROVIDER_MAP[select.dataset.provider] || {};
+        for (const [value, def] of Object.entries(providers)) {
+          if (!def.needsPackage) continue;
+          const option = select.querySelector(`option[value="${value}"]`);
+          const missing = packageStatus[def.needsPackage] && !packageStatus[def.needsPackage].installed;
+          if (option) option.disabled = !!missing;
+        }
+      });
 
       for (const [key, info] of Object.entries(packageStatus)) {
         const statusEl = container.querySelector(`[data-package="${key}"]`);
@@ -317,6 +369,17 @@ export default {
         el.innerHTML = `\u26A0\uFE0F Could not check package status`;
       });
     }
+  },
+
+  showGlobalStatus(container, message, level = 'warning') {
+    let el = container.querySelector('.voice-global-status');
+    if (!el) {
+      el = document.createElement('div');
+      el.className = 'package-status voice-global-status';
+      container.prepend(el);
+    }
+    el.className = `package-status voice-global-status ${level === 'error' ? 'not-installed' : 'installed'}`;
+    el.textContent = message;
   },
 
   validate(settings) {

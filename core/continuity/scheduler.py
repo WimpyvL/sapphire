@@ -88,11 +88,10 @@ class ContinuityScheduler:
 
         # Per-task run state: tracks busy flag, queued fires, and last matched minute
         self._task_running: Dict[str, bool] = {}
-        self._task_pending: Dict[str, list] = {}  # task_id -> [(event_data, reply_cb), ...]
+        self._task_pending: Dict[str, int] = {}
         self._task_last_matched: Dict[str, str] = {}  # task_id -> "YYYY-MM-DD HH:MM"
         self._task_progress: Dict[str, Dict] = {}  # task_id -> {iteration, total}
         self._event_threads: list = []  # track spawned event worker threads
-        self._concurrency_sem = threading.Semaphore(3)  # max 3 concurrent task threads
         
         self._ensure_dirs()
         self._load_tasks()
@@ -149,16 +148,11 @@ class ContinuityScheduler:
     def _save_tasks(self):
         """Save tasks to JSON file (atomic write via temp + rename)."""
         try:
-            import tempfile
             data = {"tasks": list(self._tasks.values())}
-            fd, tmp = tempfile.mkstemp(dir=self._tasks_path.parent, suffix='.tmp')
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=2)
-                Path(tmp).replace(self._tasks_path)
-            except Exception:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+            tmp = self._tasks_path.with_suffix('.tmp')
+            with open(tmp, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
+            tmp.replace(self._tasks_path)
         except Exception as e:
             logger.error(f"[Continuity] Failed to save tasks: {e}")
     
@@ -177,18 +171,11 @@ class ContinuityScheduler:
             self._activity = []
     
     def _save_activity(self):
-        """Save activity log to JSON file (atomic write)."""
+        """Save activity log to JSON file."""
         try:
-            import tempfile
             data = {"activity": self._activity[-50:]}  # Keep last 50
-            fd, tmp = tempfile.mkstemp(dir=self._activity_path.parent, suffix='.tmp')
-            try:
-                with os.fdopen(fd, 'w', encoding='utf-8') as f:
-                    json.dump(data, f, indent=2)
-                Path(tmp).replace(self._activity_path)
-            except Exception:
-                Path(tmp).unlink(missing_ok=True)
-                raise
+            with open(self._activity_path, 'w', encoding='utf-8') as f:
+                json.dump(data, f, indent=2)
         except Exception as e:
             logger.error(f"[Continuity] Failed to save activity: {e}")
     
@@ -218,38 +205,8 @@ class ContinuityScheduler:
     
     # =========================================================================
     # TASK CRUD
-    def _increment_run_count(self, task_id: str):
-        """Increment run counter, auto-disable/delete if limits reached. Call under self._lock."""
-        task = self._tasks.get(task_id)
-        if not task:
-            return
-        task_name = task.get("name", "Unknown")
-        max_runs = task.get("max_runs", 0)
-
-        # Increment counter (always, even for delete_after_run — for logging accuracy)
-        if max_runs > 0:
-            task["run_count"] = task.get("run_count", 0) + 1
-
-        # Check delete_after_run — fires after max_runs is reached (or immediately if max_runs=0)
-        if task.get("delete_after_run"):
-            if max_runs <= 0 or task.get("run_count", 1) >= max_runs:
-                queued = len(self._task_pending.get(task_id, []))
-                if queued:
-                    logger.warning(f"[Continuity] '{task_name}' — delete_after_run dropping {queued} queued events")
-                logger.info(f"[Continuity] '{task_name}' — delete_after_run, removing task")
-                del self._tasks[task_id]
-                self._task_pending.pop(task_id, None)
-                self._task_running.pop(task_id, None)
-                self._task_last_matched.pop(task_id, None)
-                return
-
-        # Auto-disable at max runs
-        if max_runs > 0 and task.get("run_count", 0) >= max_runs:
-            task["enabled"] = False
-            logger.info(f"[Continuity] '{task_name}' completed {task['run_count']}/{max_runs} runs — auto-disabled")
-
     # =========================================================================
-
+    
     def list_tasks(self) -> List[Dict]:
         """Get all tasks, with live progress info merged in."""
         with self._lock:
@@ -318,7 +275,6 @@ class ContinuityScheduler:
             "knowledge_scope": data.get("knowledge_scope", "none"),
             "people_scope": data.get("people_scope", "none"),
             "goal_scope": data.get("goal_scope", "none"),
-            "email_scope": data.get("email_scope", "default"),
             "heartbeat": data.get("heartbeat", False),
             "emoji": data.get("emoji", ""),
             "context_limit": data.get("context_limit", 0),
@@ -329,22 +285,11 @@ class ContinuityScheduler:
             "source": data.get("source", ""),
             "handler": data.get("handler", ""),
             "plugin_dir": data.get("plugin_dir", ""),
-            "max_runs": data.get("max_runs", 0),
-            "run_count": data.get("run_count", 0),
-            "delete_after_run": data.get("delete_after_run", False),
             "last_run": None,
             "last_response": None,
             "created": _user_now().isoformat()
         }
         
-        # Auto-generate webhook secret if not provided
-        if task_type == "webhook":
-            tc = task.get("trigger_config", {})
-            if not tc.get("secret"):
-                import secrets as _secrets
-                tc["secret"] = _secrets.token_urlsafe(32)
-                task["trigger_config"] = tc
-
         # Validate cron
         try:
             _get_croniter()(task["schedule"], _user_now())
@@ -379,24 +324,17 @@ class ContinuityScheduler:
                 "provider", "model", "prompt", "toolset", "chat_target",
                 "initial_message", "tts_enabled", "browser_tts", "inject_datetime",
                 "persona", "voice", "pitch", "speed",
-                "memory_scope", "knowledge_scope", "people_scope", "goal_scope", "email_scope",
+                "memory_scope", "knowledge_scope", "people_scope", "goal_scope",
                 "heartbeat", "emoji",
                 "context_limit", "max_parallel_tools", "max_tool_rounds",
-                "active_hours_start", "active_hours_end",
-                "max_runs", "delete_after_run"
+                "active_hours_start", "active_hours_end"
             }
             for key in allowed:
                 if key in data:
                     task[key] = data[key]
             
-            # Reset run count when re-enabling a completed task
-            if data.get("enabled") and task.get("max_runs", 0) > 0:
-                if task.get("run_count", 0) >= task["max_runs"]:
-                    task["run_count"] = 0
-                    logger.info(f"[Continuity] Reset run count for re-enabled task '{task.get('name')}'")
-
             # Reset run state — clears pending queue and allows fresh cron match
-            self._task_pending[task_id] = []
+            self._task_pending[task_id] = 0
             self._task_last_matched.pop(task_id, None)
 
             self._save_tasks()
@@ -473,13 +411,6 @@ class ContinuityScheduler:
 
     def _execute_task(self, task: Dict):
         """Execute a task and drain any pending queue. Runs on a worker thread."""
-        self._concurrency_sem.acquire()
-        try:
-            self._execute_task_inner(task)
-        finally:
-            self._concurrency_sem.release()
-
-    def _execute_task_inner(self, task: Dict):
         task_id = task["id"]
         task_name = task.get("name", "Unnamed")
 
@@ -489,7 +420,7 @@ class ContinuityScheduler:
                 live_task = self._tasks.get(task_id)
                 if not live_task or not live_task.get("enabled", True):
                     logger.info(f"[Continuity] '{task_name}' disabled — stopping execution")
-                    self._task_pending[task_id] = []
+                    self._task_pending[task_id] = 0
                     self._task_running[task_id] = False
                     self._task_progress.pop(task_id, None)
                     break
@@ -505,7 +436,6 @@ class ContinuityScheduler:
                 with self._lock:
                     if task_id in self._tasks:
                         self._tasks[task_id]["last_run"] = _user_now().isoformat()
-                        self._increment_run_count(task_id)
                         self._save_tasks()
                     self._task_progress.pop(task_id, None)
 
@@ -523,10 +453,9 @@ class ContinuityScheduler:
 
             # Check for queued fires
             with self._lock:
-                queue = self._task_pending.get(task_id, [])
-                if queue:
-                    queue.pop(0)  # Cron queues don't carry data, just drain
-                    logger.info(f"[Continuity] '{task_name}' draining queue ({len(queue)} remaining)")
+                if self._task_pending.get(task_id, 0) > 0:
+                    self._task_pending[task_id] -= 1
+                    logger.info(f"[Continuity] '{task_name}' draining queue ({self._task_pending[task_id]} remaining)")
                     continue  # Run again immediately
                 else:
                     self._task_running[task_id] = False
@@ -600,10 +529,9 @@ class ContinuityScheduler:
             # If task is already running, queue it instead of overlapping
             with self._lock:
                 if self._task_running.get(task_id, False):
-                    queue = self._task_pending.setdefault(task_id, [])
-                    queue.append((None, None))  # Cron queues don't carry event data
-                    logger.info(f"[Continuity] '{task_name}' busy — queued (pending: {len(queue)})")
-                    self._log_activity(task_id, task_name, "queued", {"pending": len(queue)})
+                    self._task_pending[task_id] = self._task_pending.get(task_id, 0) + 1
+                    logger.info(f"[Continuity] '{task_name}' busy — queued (pending: {self._task_pending[task_id]})")
+                    self._log_activity(task_id, task_name, "queued", {"pending": self._task_pending[task_id]})
                     continue
                 self._task_running[task_id] = True
 
@@ -648,7 +576,6 @@ class ContinuityScheduler:
             with self._lock:
                 if task_id in self._tasks:
                     self._tasks[task_id]["last_run"] = _user_now().isoformat()
-                    self._increment_run_count(task_id)
                     self._save_tasks()
 
             status = "complete" if result.get("success") else "error"
@@ -698,20 +625,6 @@ class ContinuityScheduler:
 
         task_name = task.get("name", "Unnamed")
 
-        # Auto-filter by account: if task specifies an account in trigger_config,
-        # only process events from that account (e.g., multi-bot Discord/Telegram)
-        trigger_config = task.get("trigger_config", {})
-        task_account = trigger_config.get("account", "")
-        if task_account:
-            try:
-                event_obj = json.loads(event_data) if isinstance(event_data, str) else event_data
-                event_account = event_obj.get("account", "") if isinstance(event_obj, dict) else ""
-                if event_account and event_account != task_account:
-                    logger.debug(f"[Continuity] '{task_name}' skipped — event from '{event_account}', task wants '{task_account}'")
-                    return {"success": False, "error": "Account mismatch"}
-            except (json.JSONDecodeError, TypeError):
-                pass
-
         # Check filter (daemon and webhook tasks)
         if task_type in ("daemon", "webhook"):
             trigger_config = task.get("trigger_config", {})
@@ -745,46 +658,40 @@ class ContinuityScheduler:
                     logger.debug(f"[Continuity] '{task_name}' filter active but event data not parseable as JSON, rejecting")
                     return {"success": False, "error": "Event data not JSON-parseable, filter requires JSON"}
 
-        # If already running, queue with actual event data (not just a counter)
+        # If already running, queue
         with self._lock:
             if self._task_running.get(task_id, False):
-                queue = self._task_pending.get(task_id, [])
-                if len(queue) >= 50:
-                    logger.warning(f"[Continuity] '{task_name}' queue full ({len(queue)} pending), dropping event")
+                pending = self._task_pending.get(task_id, 0)
+                if pending >= 50:
+                    logger.warning(f"[Continuity] '{task_name}' queue full ({pending} pending), dropping event")
                     return {"success": False, "error": "Event queue full"}
-                queue.append((event_data, reply_callback))
-                self._task_pending[task_id] = queue
-                logger.info(f"[Continuity] '{task_name}' busy — queued event ({len(queue)} pending)")
+                self._task_pending[task_id] = pending + 1
+                logger.info(f"[Continuity] '{task_name}' busy — queued event ({pending + 1} pending)")
                 return {"success": True, "queued": True}
             self._task_running[task_id] = True
 
         # Build response callback — saves last_response + routes reply to daemon source
         internal_cb = self._make_response_callback(task_id)
-        def _make_reply_cb(cur_event_data, cur_reply_callback):
-            def _response_callback(response_text: str):
-                internal_cb(response_text)
-                if cur_reply_callback and response_text:
-                    try:
-                        event_dict = json.loads(cur_event_data) if isinstance(cur_event_data, str) else cur_event_data
-                    except (json.JSONDecodeError, TypeError):
-                        event_dict = {"raw": cur_event_data}
-                    try:
-                        cur_reply_callback(task, event_dict, response_text)
-                    except Exception as e:
-                        logger.error(f"[Continuity] Reply callback failed for '{task_name}': {e}")
-            return _response_callback
+        def _response_callback(response_text: str):
+            internal_cb(response_text)
+            if reply_callback and response_text:
+                try:
+                    event_dict = json.loads(event_data) if isinstance(event_data, str) else event_data
+                except (json.JSONDecodeError, TypeError):
+                    event_dict = {"raw": event_data}
+                try:
+                    reply_callback(task, event_dict, response_text)
+                except Exception as e:
+                    logger.error(f"[Continuity] Reply callback failed for '{task_name}': {e}")
 
         # Run on worker thread — executes once then drains any queued events
-        cur_event_data = event_data
-        cur_reply_callback = reply_callback
         def _run():
-            nonlocal cur_event_data, cur_reply_callback
             while True:
                 # Check task still exists and is enabled
                 with self._lock:
                     live_task = self._tasks.get(task_id)
                     if not live_task or not live_task.get("enabled", True):
-                        self._task_pending[task_id] = []
+                        self._task_pending[task_id] = 0
                         self._task_running[task_id] = False
                         self._task_progress.pop(task_id, None)
                         break
@@ -793,14 +700,13 @@ class ContinuityScheduler:
                 try:
                     result = self.executor.run(
                         task,
-                        event_data=cur_event_data,
+                        event_data=event_data,
                         progress_callback=self._make_progress_callback(task_id),
-                        response_callback=_make_reply_cb(cur_event_data, cur_reply_callback),
+                        response_callback=_response_callback,
                     )
                     with self._lock:
                         if task_id in self._tasks:
                             self._tasks[task_id]["last_run"] = _user_now().isoformat()
-                            self._increment_run_count(task_id)
                             self._save_tasks()
                         self._task_progress.pop(task_id, None)
 
@@ -815,12 +721,11 @@ class ContinuityScheduler:
                     with self._lock:
                         self._task_progress.pop(task_id, None)
 
-                # Drain queued events (with their actual data) or release
+                # Drain queued events or release
                 with self._lock:
-                    queue = self._task_pending.get(task_id, [])
-                    if queue:
-                        cur_event_data, cur_reply_callback = queue.pop(0)
-                        logger.info(f"[Continuity] '{task_name}' draining event queue ({len(queue)} remaining)")
+                    if self._task_pending.get(task_id, 0) > 0:
+                        self._task_pending[task_id] -= 1
+                        logger.info(f"[Continuity] '{task_name}' draining event queue ({self._task_pending[task_id]} remaining)")
                         continue
                     else:
                         self._task_running[task_id] = False
@@ -845,26 +750,6 @@ class ContinuityScheduler:
                 if tc.get("source") == source:
                     results.append(dict(task))
         return results
-
-    def active_daemon_accounts(self, source: str) -> set:
-        """Return set of account names that have enabled daemon tasks for a given source.
-        Reads 'account' from trigger_config or filter. Empty set = no active tasks."""
-        accounts = set()
-        with self._lock:
-            for task in self._tasks.values():
-                if task.get("type") != "daemon" or not task.get("enabled", True):
-                    continue
-                tc = task.get("trigger_config", {})
-                if tc.get("source") != source:
-                    continue
-                acct = tc.get("account", "")
-                if acct:
-                    accounts.add(acct)
-                # Also check filter for legacy tasks without task_field
-                filt = tc.get("filter", {})
-                if isinstance(filt, dict) and filt.get("account"):
-                    accounts.add(filt["account"])
-        return accounts
 
     def find_webhook_task(self, path: str, method: str = "POST") -> Optional[Dict]:
         """Find an enabled webhook task matching path and method."""

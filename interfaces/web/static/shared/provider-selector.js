@@ -9,35 +9,6 @@
  *   disabledMessage – text when provider is 'none'
  */
 
-/**
- * Fetch plugin-registered providers from the registry API and merge into tabConfig.
- * Call this before renderProviderTab() to include dynamically registered providers.
- */
-export async function mergeRegistryProviders(tabConfig) {
-    const apiMap = { 'TTS_PROVIDER': '/api/tts/providers', 'STT_PROVIDER': '/api/stt/providers' };
-    const url = apiMap[tabConfig.providerKey];
-    if (!url) return tabConfig;
-    try {
-        const res = await fetch(url);
-        if (!res.ok) return tabConfig;
-        const data = await res.json();
-        const merged = { ...tabConfig, providers: { ...tabConfig.providers } };
-        for (const p of (data.providers || [])) {
-            if (!merged.providers[p.key]) {
-                merged.providers[p.key] = {
-                    label: p.display_name || p.key,
-                    essentialKeys: [],
-                    advancedKeys: [],
-                    _plugin: true,
-                };
-            }
-        }
-        return merged;
-    } catch (e) {
-        return tabConfig;
-    }
-}
-
 export function renderProviderTab(tabConfig, ctx) {
     const effective = _filterProviders(tabConfig, ctx);
     const current = _currentProvider(effective, ctx);
@@ -50,11 +21,6 @@ export function renderProviderTab(tabConfig, ctx) {
             ${effective.disabledMessage || 'Disabled. Select a provider above to enable.'}
         </p>`;
         return html;
-    }
-
-    // Plugin providers: render inline settings from plugin manifest + test button
-    if (providerDef._plugin && !providerDef.essentialKeys?.length) {
-        html += `<div id="plugin-provider-settings" data-plugin="${current}" style="padding:8px 0"></div>`;
     }
 
     // Provider-specific essential fields
@@ -82,9 +48,6 @@ export function renderProviderTab(tabConfig, ctx) {
 export function attachProviderListeners(tabConfig, ctx, el, tabModule) {
     const dropdown = el.querySelector(`#setting-${tabConfig.providerKey}`);
     if (!dropdown) return;
-
-    // Load inline plugin settings if a plugin provider is selected
-    _loadPluginProviderSettings(el);
 
     dropdown.addEventListener('change', () => {
         ctx.markChanged(tabConfig.providerKey, dropdown.value);
@@ -120,8 +83,7 @@ function _filterProviders(tabConfig, ctx) {
     const hide = ctx.managed ? MANAGED_HIDE : UNMANAGED_HIDE;
     const filtered = {};
     for (const [key, val] of Object.entries(tabConfig.providers)) {
-        // Don't hide plugin-registered providers — user explicitly enabled them
-        if (val._plugin || !hide.has(key)) filtered[key] = val;
+        if (!hide.has(key)) filtered[key] = val;
     }
     return { ...tabConfig, providers: filtered };
 }
@@ -164,54 +126,4 @@ function _renderDropdown(tabConfig, current, ctx) {
             </div>
         </div>
     `;
-}
-
-async function _loadPluginProviderSettings(el) {
-    const box = el.querySelector('#plugin-provider-settings');
-    if (!box) return;
-    const pluginName = box.dataset.plugin;
-    if (!pluginName) return;
-
-    try {
-        // Fetch plugin manifest + settings
-        const [pluginsRes, settingsRes] = await Promise.all([
-            fetch('/api/webui/plugins'),
-            fetch(`/api/webui/plugins/${pluginName}/settings`),
-        ]);
-        if (!pluginsRes.ok || !settingsRes.ok) {
-            box.innerHTML = `<p class="setting-help">Configure in Settings \u2192 Plugins \u2192 ${pluginName}</p>`;
-            return;
-        }
-        const pluginsData = await pluginsRes.json();
-        const settingsData = await settingsRes.json();
-        const plugin = (pluginsData.plugins || []).find(p => p.name === pluginName);
-        const schema = plugin?.settings_schema || [];
-        const values = settingsData.settings || {};
-
-        if (!schema.length) {
-            box.innerHTML = `<p class="setting-help">No settings for this provider.</p>`;
-            return;
-        }
-
-        // Render using the shared plugin settings renderer
-        const { renderSettingsForm, readSettingsForm } = await import('./plugin-settings-renderer.js');
-        renderSettingsForm(box, schema, values);
-
-        // Auto-save on change
-        box.addEventListener('change', async () => {
-            const updated = readSettingsForm(box, schema);
-            try {
-                const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || '';
-                await fetch(`/api/webui/plugins/${pluginName}/settings`, {
-                    method: 'PUT',
-                    headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
-                    body: JSON.stringify(updated),
-                });
-            } catch (e) {
-                console.warn('Failed to save plugin provider settings:', e);
-            }
-        });
-    } catch (e) {
-        box.innerHTML = `<p class="setting-help">Configure in Settings \u2192 Plugins \u2192 ${pluginName}</p>`;
-    }
 }

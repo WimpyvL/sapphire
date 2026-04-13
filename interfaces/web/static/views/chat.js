@@ -87,24 +87,15 @@ export default {
         // Refresh voice dropdown when TTS provider changes
         eventBus.on('settings_changed', (data) => {
             if (data?.key === 'TTS_PROVIDER') refreshVoiceDropdown();
-            if (data?.key === 'LLM_PROVIDERS' || data?.key === 'LLM_CUSTOM_PROVIDERS') loadSidebar();
         });
 
-        // Refresh prompt dropdown when prompts are created/deleted
-        eventBus.on(eventBus.Events.PROMPT_CHANGED, () => loadSidebar());
-        eventBus.on(eventBus.Events.PROMPT_DELETED, () => loadSidebar());
-
-        // Refresh spice dropdown when spice sets change
-        eventBus.on(eventBus.Events.SPICE_CHANGED, () => loadSidebar());
-
-        // Accordion headers in sidebar (event delegation — handles core + plugin accordions)
-        const sbFull = container.querySelector('.sb-full-content');
-        if (sbFull) sbFull.addEventListener('click', e => {
-            const header = e.target.closest('.sidebar-accordion-header');
-            if (!header) return;
-            const content = header.nextElementSibling;
-            const open = header.classList.toggle('open');
-            content.style.display = open ? 'block' : 'none';
+        // Accordion headers in sidebar
+        container.querySelectorAll('.sidebar-accordion-header').forEach(header => {
+            header.addEventListener('click', () => {
+                const content = header.nextElementSibling;
+                const open = header.classList.toggle('open');
+                content.style.display = open ? 'block' : 'none';
+            });
         });
 
         // Sidebar chat picker
@@ -201,7 +192,7 @@ export default {
             }
         };
 
-        // Toggle buttons (Spice, Date/Time)
+        // Toggle buttons (Tone, Date/Time)
         container.querySelectorAll('.sb-toggle').forEach(btn => {
             btn.addEventListener('click', () => {
                 const active = btn.dataset.active !== 'true';
@@ -235,7 +226,7 @@ export default {
                 }
                 if (el.id === 'sb-spice-turns') {
                     const toggle = container.querySelector('#sb-spice-toggle');
-                    if (toggle) toggle.textContent = `Spice \u00b7 ${el.value}`;
+                    if (toggle) toggle.textContent = `Tone \u00b7 ${el.value}`;
                 }
                 if (el.id === 'sb-story-enabled' || el.id === 'sb-story-preset') {
                     updateStoryPromptLabel(container);
@@ -402,67 +393,6 @@ async function loadDocuments(container, chatName) {
     }
 }
 
-async function _loadPluginAccordions(container, init) {
-    const slot = container.querySelector('#sb-plugin-accordions');
-    if (!slot) return;
-
-    // Get plugin list with accordion declarations
-    const enabledPlugins = new Set(init?.plugins_config?.enabled || []);
-    let plugins = [];
-    try {
-        const resp = await fetch('/api/webui/plugins');
-        if (resp.ok) {
-            const data = await resp.json();
-            plugins = (data.plugins || []).filter(p =>
-                enabledPlugins.has(p.name) && p.sidebar_accordion
-            );
-        }
-    } catch (e) { return; }
-
-    // Clear previous plugin accordions
-    slot.innerHTML = '';
-
-    for (const plugin of plugins) {
-        const acc = plugin.sidebar_accordion;
-        const section = document.createElement('div');
-        section.className = 'sidebar-section sidebar-accordion';
-        section.dataset.pluginAccordion = plugin.name;
-
-        const header = document.createElement('div');
-        header.className = 'sidebar-accordion-header';
-        header.innerHTML = `<span class="accordion-arrow">&#x25B6;</span>` +
-            `<span>${acc.icon || ''} ${acc.title || plugin.name}</span>`;
-
-        const content = document.createElement('div');
-        content.className = 'sidebar-accordion-content';
-        content.style.display = 'none';
-
-        section.appendChild(header);
-        section.appendChild(content);
-        slot.appendChild(section);
-
-        // Load HTML content from plugin web dir
-        if (acc.content) {
-            try {
-                const htmlResp = await fetch(`/plugin-web/${plugin.name}/${acc.content}`);
-                if (htmlResp.ok) content.innerHTML = await htmlResp.text();
-            } catch (e) {
-                content.innerHTML = `<div class="sb-field" style="color:var(--error)">Failed to load</div>`;
-            }
-        }
-
-        // Load + init JS module (re-inits on each sidebar reload — module is cached by browser)
-        if (acc.script) {
-            try {
-                const mod = await import(`/plugin-web/${plugin.name}/${acc.script}`);
-                if (mod.init) mod.init(content, plugin.name);
-            } catch (e) {
-                console.warn(`[SIDEBAR] Failed to load accordion script for ${plugin.name}:`, e);
-            }
-        }
-    }
-}
-
 async function loadSidebar() {
     const container = document.getElementById('view-chat');
     if (!container) return;
@@ -571,22 +501,10 @@ async function loadSidebar() {
             llmMetadata = llmData.metadata || {};
             const llmSel = container.querySelector('#sb-llm-primary');
             if (llmSel) {
-                const coreProv = llmProviders.filter(p => p.enabled && p.is_core);
-                const customProv = llmProviders.filter(p => p.enabled && !p.is_core);
-                let llmOpts = '<option value="auto">Auto</option><option value="none">None</option>';
-                if (coreProv.length) {
-                    llmOpts += coreProv.map(p =>
+                llmSel.innerHTML = '<option value="auto">Auto</option><option value="none">None</option>' +
+                    llmProviders.filter(p => p.enabled).map(p =>
                         `<option value="${p.key}">${p.display_name}${p.is_local ? ' \uD83C\uDFE0' : ' \u2601\uFE0F'}</option>`
                     ).join('');
-                }
-                if (customProv.length) {
-                    llmOpts += '<option disabled>\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500</option>';
-                    llmOpts += customProv.map(p => {
-                        const model = p.model ? ` (${p.model.split('/').pop()})` : '';
-                        return `<option value="${p.key}">${p.display_name}${model}${p.is_local ? ' \uD83C\uDFE0' : ' \u2601\uFE0F'}</option>`;
-                    }).join('');
-                }
-                llmSel.innerHTML = llmOpts;
                 setSelect(llmSel, settings.llm_primary || 'auto');
                 updateModelSelector(container, settings.llm_primary || 'auto', settings.llm_model || '');
             }
@@ -671,7 +589,7 @@ async function loadSidebar() {
             const accounts = telegramAccountsData?.accounts || [];
             telegramScopeSel.innerHTML = '<option value="none">None</option>' +
                 accounts.map(a =>
-                    `<option value="${a.name}">${a.type === 'bot' ? '\u{1F916}' : '\u{1F4F1}'} ${a.label || a.name}${a.username ? ' (@' + a.username + ')' : ''}</option>`
+                    `<option value="${a.name}">${a.label || a.name}${a.username ? ' (@' + a.username + ')' : ''}</option>`
                 ).join('');
             setSelect(telegramScopeSel, settings.telegram_scope || 'default');
         }
@@ -713,8 +631,6 @@ async function loadSidebar() {
                 voiceSel.innerHTML = voices.map(v =>
                     `<option value="${v.voice_id}">${v.name}${v.category ? ' (' + v.category + ')' : ''}</option>`
                 ).join('');
-            } else if (ttsProvider && ttsProvider !== 'none') {
-                voiceSel.innerHTML = '<option value="">Default</option>';
             } else {
                 voiceSel.innerHTML = '<option value="">No TTS active</option>';
             }
@@ -738,7 +654,7 @@ async function loadSidebar() {
 
         // Toggle buttons
         setToggle(container, '#sb-spice-toggle', settings.spice_enabled !== false,
-            `Spice \u00b7 ${settings.spice_turns || 3}`);
+        `Tone \u00b7 ${settings.spice_turns || 3}`);
         setToggle(container, '#sb-datetime-toggle', settings.inject_datetime === true);
         const storyEnabled = settings.story_engine_enabled === true;
         const storyPreset = settings.story_preset;
@@ -791,9 +707,6 @@ async function loadSidebar() {
         // Load per-chat documents
         loadDocuments(container, chatName);
 
-        // Inject plugin-registered accordions
-        await _loadPluginAccordions(container, init);
-
         sidebarLoaded = true;
     } catch (e) {
         console.warn('Failed to load sidebar:', e);
@@ -803,12 +716,6 @@ async function loadSidebar() {
 function debouncedSave(container) {
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => saveSettings(container), SAVE_DEBOUNCE);
-}
-
-/** Cancel any pending debounced save — called on chat switch to prevent cross-chat writes */
-export function cancelPendingSave() {
-    clearTimeout(saveTimer);
-    saveTimer = null;
 }
 
 async function saveSettings(container) {
@@ -906,8 +813,7 @@ function updateModelSelector(container, providerKey, currentModel) {
             select.innerHTML += `<option value="${currentModel}" selected>${currentModel}</option>`;
         }
         if (group) group.style.display = '';
-    } else {
-        // Custom/generic providers — free-text model input
+    } else if (providerKey === 'other') {
         if (custom) custom.value = currentModel || '';
         if (customGroup) customGroup.style.display = '';
     }
@@ -1192,11 +1098,11 @@ function updateEasyMode(container, settings, init) {
             ${emotions.length ? `<div class="sb-pdetail-wrap-row"><span>emotions</span><span>${emotions.join(', ')}</span></div>` : ''}
         `, { desc: 'Character & scenario', view: 'prompts' })}
         ${easyAccordion('Toolset', toolsHtml, { desc: 'AI capabilities', view: 'toolsets' })}
-        ${easyAccordion('Spice', `
+        ${easyAccordion('Tone', `
             <div class="sb-pdetail-row"><span>set</span><span>${pretty(settings.spice_set)}</span></div>
             <div class="sb-pdetail-row"><span>enabled</span><span>${settings.spice_enabled !== false ? 'Yes' : 'No'}</span></div>
             <div class="sb-pdetail-row"><span>turns</span><span>${settings.spice_turns || 3}</span></div>
-        `, { desc: 'Style & flavor', view: 'spices' })}
+        `, { desc: 'Style modulation', view: 'spices' })}
         ${easyAccordion('TTS', `
             <div class="sb-pdetail-row"><span>voice</span><span>${_voiceNames[settings.voice] || settings.voice || 'Heart'}</span></div>
             <div class="sb-pdetail-row"><span>pitch</span><span>${settings.pitch || 0.98}</span></div>

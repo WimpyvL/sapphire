@@ -22,7 +22,7 @@
 - Restart Sapphire app
 
 **Blank page or "Unauthorized"**
-- Clear browser cookies for localhost:8073
+- Clear browser cookies for localhost:3004
 - Try incognito window
 - Reset password (see [Reset Password](#reset-password) below) and restart
 
@@ -93,7 +93,7 @@
 - Not all models support thinking. Check provider supports it.
 - Claude: Enable "Extended Thinking" in LLM settings
 - GPT-5.x: Uses Responses API, set reasoning_summary to "detailed"
-- Gemini: Set reasoning_effort (low/medium/high) on thinking-enabled models (Gemini 2.5 Flash/Pro)
+- Fireworks: Only works with thinking-enabled models (Qwen3-Thinking, Kimi-K2-Thinking)
 - Local models via LM Studio: May need specific model that outputs `<think>` tags
 
 **Thinking breaks when switching providers**

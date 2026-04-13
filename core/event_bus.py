@@ -235,7 +235,6 @@ class Events:
 
     # Plugin events
     PLUGIN_RELOADED = "plugin_reloaded"
-    PLUGIN_LOAD_ERROR = "plugin_load_error"
 
     # Daemon/webhook events
     DAEMON_EVENT = "daemon_event"

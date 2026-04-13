@@ -156,9 +156,9 @@ class TestProviderURLDetection:
         assert provider == "claude"
     
     def test_detect_fireworks_from_url(self):
-        """Fireworks is now a custom provider using openai template."""
+        """Should detect Fireworks from fireworks.ai URL."""
         provider = get_provider_for_url("https://api.fireworks.ai/v1")
-        assert provider == "openai"  # Fireworks uses OpenAI-compat, no longer a dedicated type
+        assert provider == "fireworks"
     
     def test_detect_openai_from_localhost(self):
         """Should detect openai provider from localhost."""

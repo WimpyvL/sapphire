@@ -14,15 +14,14 @@ export function updateSendButtonLLM(primary, model = '') {
     sendBtn.classList.remove('llm-local', 'llm-cloud', 'llm-auto');
     if (indicator) indicator.classList.remove('cloud');
 
-    // Detect local vs cloud — local providers have local URLs (localhost, 127.0.0.1)
-    // Default to cloud for any named provider that isn't obviously local
-    const localPatterns = ['lmstudio', 'ollama'];
-    const isLocal = localPatterns.includes(primary) || primary === 'none';
-    const isCloud = !isLocal && primary !== 'auto';
+    // Cloud providers
+    const cloudProviders = ['claude', 'openai', 'fireworks', 'other'];
+    const isCloud = cloudProviders.includes(primary);
 
-    // Build display name
-    const displayName = primary === 'none' ? 'Off' :
-                       primary ? primary.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase()) : 'Local';
+    // Build display name - capitalize first letter
+    const displayName = primary === 'lmstudio' ? 'LM Studio' :
+                       primary === 'none' ? 'Off' :
+                       primary ? primary.charAt(0).toUpperCase() + primary.slice(1) : 'Local';
 
     // Build title suffix for model
     const modelSuffix = model ? ` (${model.split('/').pop()})` : '';

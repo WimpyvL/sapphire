@@ -6,7 +6,7 @@
 #   export SAPPHIRE_COOKIE="session=your_session_cookie_here"
 #   ./tests/test_plugins_curl.sh
 
-BASE_URL="${SAPPHIRE_URL:-https://localhost:8073}"
+BASE_URL="${SAPPHIRE_URL:-https://localhost:3004}"
 
 if [ -z "$SAPPHIRE_COOKIE" ]; then
     echo "Set SAPPHIRE_COOKIE first (grab from browser after login)"

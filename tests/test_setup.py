@@ -10,7 +10,7 @@ class TestGetConfigDir:
     """Test platform-specific config directory resolution."""
     
     def test_windows_uses_appdata(self):
-        """Windows should use %APPDATA%/Sapphire."""
+        """Windows should use Sani dir for fresh installs."""
         with patch.object(sys, 'platform', 'win32'):
             with patch.dict(os.environ, {'APPDATA': 'C:\\Users\\Test\\AppData\\Roaming'}):
                 # Re-import to pick up patches
@@ -20,7 +20,7 @@ class TestGetConfigDir:
                 
                 result = setup_module.get_config_dir()
                 
-                assert 'Sapphire' in str(result)
+                assert 'Sani' in str(result)
                 assert 'AppData' in str(result) or 'Roaming' in str(result)
     
     def test_windows_fallback_without_appdata(self):
@@ -34,10 +34,10 @@ class TestGetConfigDir:
                     
                     result = setup_module.get_config_dir()
                     
-                    assert 'Sapphire' in str(result)
+                    assert 'Sani' in str(result)
     
     def test_macos_uses_library(self):
-        """macOS should use ~/Library/Application Support/Sapphire."""
+        """macOS should use ~/Library/Application Support/Sani."""
         with patch.object(sys, 'platform', 'darwin'):
             with patch.object(Path, 'home', return_value=Path('/Users/test')):
                 import importlib
@@ -48,10 +48,10 @@ class TestGetConfigDir:
                 
                 assert 'Library' in str(result)
                 assert 'Application Support' in str(result)
-                assert 'Sapphire' in str(result)
+                assert 'Sani' in str(result)
     
     def test_linux_uses_xdg_config(self):
-        """Linux should use XDG_CONFIG_HOME/sapphire if set."""
+        """Linux should use XDG_CONFIG_HOME/sani if set."""
         with patch.object(sys, 'platform', 'linux'):
             with patch.dict(os.environ, {'XDG_CONFIG_HOME': '/custom/config'}):
                 import importlib
@@ -60,10 +60,10 @@ class TestGetConfigDir:
                 
                 result = setup_module.get_config_dir()
                 
-                assert '/custom/config' in str(result) or 'sapphire' in str(result).lower()
+                assert '/custom/config' in str(result) or 'sani' in str(result).lower()
     
     def test_linux_fallback_to_dotconfig(self):
-        """Linux should fallback to ~/.config/sapphire."""
+        """Linux should fallback to ~/.config/sani."""
         with patch.object(sys, 'platform', 'linux'):
             with patch.dict(os.environ, {}, clear=True):
                 with patch.object(Path, 'home', return_value=Path('/home/test')):
@@ -73,7 +73,7 @@ class TestGetConfigDir:
                     
                     result = setup_module.get_config_dir()
                     
-                    assert '.config' in str(result) or 'sapphire' in str(result).lower()
+                    assert '.config' in str(result) or 'sani' in str(result).lower()
 
 
 class TestEnsureConfigDirectory:
@@ -293,6 +293,8 @@ class TestSocksCredentials:
         from core.setup import get_socks_credentials
         
         with patch.dict(os.environ, {
+            'SANI_SOCKS_USERNAME': 'envuser',
+            'SANI_SOCKS_PASSWORD': 'envpass',
             'SAPPHIRE_SOCKS_USERNAME': 'envuser',
             'SAPPHIRE_SOCKS_PASSWORD': 'envpass'
         }):

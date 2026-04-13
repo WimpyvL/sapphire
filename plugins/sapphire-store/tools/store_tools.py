@@ -214,9 +214,7 @@ def _install(slug, plugin_settings=None):
             return f"Failed to download from GitHub (HTTP {zr.status_code})", False
 
         # Save zip to temp
-        tmp_fd = tempfile.NamedTemporaryFile(suffix=".zip", delete=False)
-        tmp_zip = Path(tmp_fd.name)
-        tmp_fd.close()
+        tmp_zip = Path(tempfile.mktemp(suffix=".zip"))
         tmp_dir = None
         try:
             with open(tmp_zip, "wb") as f:
@@ -255,7 +253,7 @@ def _install(slug, plugin_settings=None):
             plugin_author = manifest.get("author", "unknown")
 
             # Check if already installed
-            from core.plugin_loader import plugin_loader
+            from core.plugin_loader import plugin_loader, PluginState
             # __file__ = plugins/sapphire-store/tools/store_tools.py → 4 parents up to project root
             PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
             USER_PLUGINS_DIR = PROJECT_ROOT / "user" / "plugins"
@@ -279,7 +277,7 @@ def _install(slug, plugin_settings=None):
 
             # Write install metadata
             from datetime import datetime
-            state = plugin_loader.get_plugin_state(plugin_name)
+            state = PluginState(plugin_name)
             state.save("installed_from", github_url)
             state.save("install_method", "github_url")
             state.save("installed_at", datetime.utcnow().isoformat() + "Z")

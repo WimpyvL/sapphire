@@ -1,8 +1,8 @@
-# Sapphire Consumer Docker Image
+# Sani Consumer Docker Image
 # Self-contained: Kokoro TTS + Faster Whisper STT + Nomic Embeddings
 #
-# CPU:  docker build -t sapphire:cpu .
-# GPU:  docker build --build-arg BASE_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 -t sapphire:gpu .
+# CPU:  docker build -t sani:cpu .
+# GPU:  docker build --build-arg BASE_IMAGE=nvidia/cuda:12.4.1-runtime-ubuntu22.04 -t sani:gpu .
 
 # ============================================================
 # Stage 1: Base + system deps
@@ -36,8 +36,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Non-root user
-RUN groupadd -g 1000 sapphire 2>/dev/null || true && \
-    useradd -u 1000 -g 1000 -m sapphire 2>/dev/null || true
+RUN groupadd -g 1000 sani 2>/dev/null || true && \
+    useradd -u 1000 -g 1000 -m sani 2>/dev/null || true
 
 # ============================================================
 # Stage 2: Python dependencies (cached layer — rarely changes)
@@ -95,22 +95,23 @@ ENV TORCH_HOME=/app/models/torch
 
 # Docker-specific settings — only infrastructure concerns that MUST differ in Docker
 # Do NOT put user-changeable settings here (env vars always win over Settings UI)
+ENV SANI_DOCKER=true
 ENV SAPPHIRE_DOCKER=true
 ENV WEB_UI_HOST=0.0.0.0
-ENV WEB_UI_PORT=8073
+ENV WEB_UI_PORT=3004
 
 # Copy application code
 COPY . /app
 
 # Create mount point directories (bind mounts override these)
-RUN mkdir -p /app/user /app/user_backups && chown -R sapphire:sapphire /app
+RUN mkdir -p /app/user /app/user_backups && chown -R sani:sani /app
 
 # Switch to non-root
-USER sapphire
+USER sani
 
-EXPOSE 8073
+EXPOSE 3004
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=60s --retries=3 \
-    CMD curl -fsk https://localhost:8073/api/health || exit 1
+    CMD curl -fsk https://localhost:3004/api/health || exit 1
 
 CMD ["python", "main.py"]

@@ -215,7 +215,7 @@ function renderDetail(p, isActive) {
 
                 <div class="pa-fence-group">
                     <div class="pa-fence-heading">
-                        <span>Spice</span>
+                        <span>Tone</span>
                         <span class="pa-fence-heading-right">
                             <label class="pa-fence-toggle">
                                 <input type="checkbox" id="pa-s-spice_enabled" data-key="spice_enabled" ${s.spice_enabled !== false ? 'checked' : ''}>
@@ -225,9 +225,9 @@ function renderDetail(p, isActive) {
                     </div>
                     <div class="pa-fence">
                         <div class="pa-fence-body">
-                            ${renderSettingField('spice_set', 'Set', s, renderSpiceSetOptions(s.spice_set), { tip: 'Flavor pack for AI responses', view: 'spices' })}
+                            ${renderSettingField('spice_set', 'Pack', s, renderSpiceSetOptions(s.spice_set), { tip: 'Style pack for AI responses', view: 'spices' })}
                             <div class="pa-field">
-                                <label>Turns <span class="help-tip" data-tip="Spice activates every N turns">?</span></label>
+                                <label>Interval <span class="help-tip" data-tip="Tone cue activates every N turns">?</span></label>
                                 <input type="number" id="pa-s-spice_turns" min="1" max="20" value="${s.spice_turns || 3}" data-key="spice_turns">
                             </div>
                         </div>
@@ -402,7 +402,7 @@ function updateModelSelector(providerKey, currentModel) {
             select.innerHTML += `<option value="${currentModel}" selected>${currentModel}</option>`;
         }
         if (group) group.style.display = '';
-    } else {
+    } else if (providerKey === 'other') {
         if (custom) custom.value = currentModel || '';
         if (customGroup) customGroup.style.display = '';
     }
@@ -522,8 +522,7 @@ function bindEvents() {
     // Clear default
     container.querySelector('#pa-clear-default')?.addEventListener('click', async () => {
         try {
-            const csrf = document.querySelector('meta[name="csrf-token"]')?.content || '';
-            await fetch('/api/personas/default', { method: 'DELETE', headers: { 'X-CSRF-Token': csrf } });
+            await fetch('/api/personas/default', { method: 'DELETE' });
             defaultPersona = '';
             render();
             ui.showToast('Default cleared', 'success');
@@ -687,12 +686,8 @@ function bindEvents() {
         }
     });
 
-    // Name changes only on blur (rename triggers re-render which yanks focus)
-    container.querySelector('#pa-name')?.addEventListener('blur', () => debouncedSave());
-    container.querySelector('#pa-name')?.addEventListener('keydown', e => {
-        if (e.key === 'Enter') { e.preventDefault(); e.target.blur(); }
-    });
-    // Tagline changes (debounced save on input is fine)
+    // Name/tagline changes (debounced save)
+    container.querySelector('#pa-name')?.addEventListener('input', () => debouncedSave());
     container.querySelector('#pa-tagline')?.addEventListener('input', () => debouncedSave());
 
     // Provider change → update model dropdown

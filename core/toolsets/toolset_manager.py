@@ -217,10 +217,9 @@ class ToolsetManager:
             data = {"_comment": "Your toolsets"}
             data.update(self._toolsets)
             
-            tmp_path = user_path.with_suffix('.tmp')
-            with open(tmp_path, 'w', encoding='utf-8') as f:
+            with open(user_path, 'w', encoding='utf-8') as f:
+
                 json.dump(data, f, indent=2)
-            tmp_path.replace(user_path)
             
             # Update mtime after save to prevent watcher from triggering
             self._last_mtimes[str(user_path)] = user_path.stat().st_mtime

@@ -1,28 +1,29 @@
-# Sapphire - Docker Compose
+# Sani - Docker Compose
 # Usage:
 #   docker compose up        (start)
 #   docker compose pull      (update to latest)
 #   docker compose down      (stop)
 #
-# First run: open https://localhost:8073 and complete setup wizard
-# Data is stored in ./sapphire-data/ next to this file
+# First run: open https://localhost:3004 and complete setup wizard
+# Data is stored in ./sani-data/ next to this file for fresh installs.
+# Legacy Sapphire paths still work if you already have data there.
 
 services:
-  sapphire:
-    image: ghcr.io/ddxfish/sapphire:latest
+  sani:
+    image: ghcr.io/ddxfish/sani:latest
     # For local development builds, comment out 'image' above and uncomment:
     # build: .
-    container_name: sapphire
+    container_name: sani
     restart: unless-stopped
     ports:
-      - "8073:8073"
+      - "3004:3004"
     volumes:
       # User data — chats, memories, settings, plugins (visible on your machine)
-      - ./sapphire-data:/app/user
+      - ./sani-data:/app/user
       # Backups — separate from user data for safety
-      - ./sapphire-backups:/app/user_backups
+      - ./sani-backups:/app/user_backups
       # Credentials — API keys, secrets
-      - ./sapphire-config:/home/sapphire/.config/sapphire
+      - ./sani-config:/home/sani/.config/sani
     environment:
       # Timezone — find yours: https://en.wikipedia.org/wiki/List_of_tz_database_time_zones
       TZ: "America/New_York"

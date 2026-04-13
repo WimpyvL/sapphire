@@ -266,15 +266,6 @@ class FunctionManager:
                 mode_filter = namespace.get('MODE_FILTER')
 
                 with self._tools_lock:
-                    # Check for function name conflicts BEFORE mutating state
-                    existing_names = {t['function']['name'] for t in self.all_possible_tools}
-                    for tool in tools:
-                        fname = tool['function']['name']
-                        if fname in existing_names:
-                            owner = self._function_module_map.get(fname, 'unknown')
-                            logger.error(f"\033[91mPlugin '{plugin_name}' tool '{fname}' conflicts with existing tool from '{owner}' — plugin NOT loaded\033[0m")
-                            raise ValueError(f"Tool name '{fname}' already registered by '{owner}'")
-
                     self.function_modules[module_name] = {
                         'module': None,
                         'tools': tools,
@@ -284,7 +275,10 @@ class FunctionManager:
                         '_plugin': plugin_name,
                     }
 
-                    # Track per-tool flags (safe — conflict check passed)
+                    # Plugin settings live in user/webui/plugins/{name}.json only
+                    # No register_tool_settings — single settings path, no collisions
+
+                    # Track per-tool flags
                     for tool in tools:
                         func_name = tool['function']['name']
                         if tool.get('network', False):
@@ -295,6 +289,15 @@ class FunctionManager:
 
                     if mode_filter:
                         self._mode_filters[module_name] = mode_filter
+
+                    # Check for function name conflicts — hard error, don't silently corrupt
+                    existing_names = {t['function']['name'] for t in self.all_possible_tools}
+                    for tool in tools:
+                        fname = tool['function']['name']
+                        if fname in existing_names:
+                            owner = self._function_module_map.get(fname, 'unknown')
+                            logger.error(f"\033[91mPlugin '{plugin_name}' tool '{fname}' conflicts with existing tool from '{owner}' — plugin NOT loaded\033[0m")
+                            raise ValueError(f"Tool name '{fname}' already registered by '{owner}'")
 
                     for tool in tools:
                         self.all_possible_tools.append(tool)
@@ -309,13 +312,6 @@ class FunctionManager:
 
                 logger.info(f"Plugin '{plugin_name}' tool '{module_name}': {len(tools)} tools registered")
 
-            except ModuleNotFoundError as e:
-                logger.error(f"Missing dependency for plugin tool '{tool_path}': {e}")
-                from core.event_bus import publish, Events
-                publish(Events.PLUGIN_LOAD_ERROR, {
-                    "plugin": plugin_name, "error": f"Missing pip package: {e.name or e}",
-                    "hint": f"pip install {e.name}" if e.name else str(e)
-                })
             except Exception as e:
                 logger.error(f"Failed to load plugin tool '{tool_path}': {e}", exc_info=True)
 
@@ -346,78 +342,6 @@ class FunctionManager:
 
         if to_remove:
             logger.info(f"Plugin '{plugin_name}' tools unregistered: {to_remove}")
-
-    def register_dynamic_tools(self, module_name: str, tools: list, executor, plugin_name: str = '', emoji: str = ''):
-        """Register tools from a dynamic source (MCP servers, runtime generators, etc.).
-
-        Unlike register_plugin_tools which loads from Python files, this accepts
-        pre-built tool definitions and an executor callable directly.
-
-        Args:
-            module_name: Unique module key (e.g. "mcp:filesystem")
-            tools: List of tool dicts in OpenAI format [{type: "function", function: {name, description, parameters}}]
-            executor: Callable(function_name, arguments, config) -> (result, success)
-            plugin_name: Owner plugin for cleanup tracking (used by unregister_plugin_tools)
-            emoji: Display emoji for toolset UI
-        """
-        available = [t['function']['name'] for t in tools]
-
-        with self._tools_lock:
-            # Check for conflicts
-            existing_names = {t['function']['name'] for t in self.all_possible_tools}
-            for tool in tools:
-                fname = tool['function']['name']
-                if fname in existing_names:
-                    owner = self._function_module_map.get(fname, 'unknown')
-                    logger.warning(f"Dynamic tool '{fname}' conflicts with '{owner}' — skipping")
-                    tools = [t for t in tools if t['function']['name'] != fname]
-                    available = [a for a in available if a != fname]
-
-            if not tools:
-                return
-
-            self.function_modules[module_name] = {
-                'module': None,
-                'tools': tools,
-                'executor': executor,
-                'available_functions': available,
-                'emoji': emoji,
-                '_plugin': plugin_name,
-            }
-
-            for tool in tools:
-                fname = tool['function']['name']
-                self.execution_map[fname] = executor
-                self._function_module_map[fname] = module_name
-                self.all_possible_tools.append(tool)
-
-            # If "all" toolset is active, add to enabled too
-            if self.current_toolset_name == "all":
-                enabled_names = {t['function']['name'] for t in self._enabled_tools}
-                for tool in tools:
-                    if tool['function']['name'] not in enabled_names:
-                        self._enabled_tools.append(tool)
-
-        logger.info(f"Dynamic tools registered: {module_name} ({len(tools)} tools)")
-
-    def unregister_dynamic_tools(self, module_name: str):
-        """Remove a dynamically registered tool module by name."""
-        with self._tools_lock:
-            info = self.function_modules.pop(module_name, None)
-            if not info:
-                return
-
-            func_names = set(info['available_functions'])
-            for fname in func_names:
-                self.execution_map.pop(fname, None)
-                self._function_module_map.pop(fname, None)
-
-            self.all_possible_tools = [t for t in self.all_possible_tools
-                                       if t['function']['name'] not in func_names]
-            self._enabled_tools = [t for t in self._enabled_tools
-                                   if t['function']['name'] not in func_names]
-
-        logger.info(f"Dynamic tools unregistered: {module_name}")
 
     def _get_current_prompt_mode(self) -> str:
         """Get current prompt mode for filtering. Returns 'monolith' or 'assembled'."""
@@ -496,11 +420,6 @@ class FunctionManager:
             else:
                 logger.warning(f"Duplicate tool '{name}' removed from enabled_tools")
         return deduped
-
-    def snapshot_executors(self) -> dict:
-        """Snapshot current execution_map — use to protect against reload during tool execution."""
-        with self._tools_lock:
-            return dict(self.execution_map)
 
     def update_enabled_functions(self, enabled_names: list):
         """Update enabled tools based on function names from config or ability name."""
@@ -745,7 +664,7 @@ class FunctionManager:
         except Exception:
             return None
 
-    def execute_function(self, function_name, arguments, scopes=None, allowed_tools=None, executor_snapshot=None):
+    def execute_function(self, function_name, arguments, scopes=None, allowed_tools=None):
         """Execute a function using the mapped executor.
 
         scopes: optional dict to re-apply ContextVars before execution.
@@ -754,8 +673,6 @@ class FunctionManager:
         allowed_tools: optional set/list of function names that were sent to the LLM.
                        When provided, validates against this snapshot instead of
                        current enabled_tools (prevents race conditions on plugin reload).
-        executor_snapshot: optional dict of {name: executor} captured at stream start.
-                           Prevents reload from yanking executor mid-chat.
         """
         if scopes:
             restore_scopes(scopes)
@@ -823,8 +740,7 @@ class FunctionManager:
                 success = False
 
         else:
-            emap = executor_snapshot if executor_snapshot else self.execution_map
-            executor = emap.get(function_name)
+            executor = self.execution_map.get(function_name)
             if not executor:
                 logger.error(f"No executor found for function '{function_name}'")
                 result = f"The tool {function_name} is recognized but has no execution logic."
@@ -832,21 +748,13 @@ class FunctionManager:
                 return result
 
             try:
-                # For plugin tools, inject plugin settings (4th arg) + credentials (5th arg)
+                # For plugin tools, inject plugin settings as 4th arg
                 plugin_settings = self._get_plugin_settings_for(function_name)
                 if plugin_settings is not None:
-                    from core.credentials_manager import credentials
-                    import inspect
                     try:
-                        sig = inspect.signature(executor)
-                        nparams = len(sig.parameters)
-                    except (ValueError, TypeError):
-                        nparams = 5  # assume full signature
-                    if nparams >= 5:
-                        result, success = executor(function_name, arguments, config, plugin_settings, credentials)
-                    elif nparams >= 4:
                         result, success = executor(function_name, arguments, config, plugin_settings)
-                    else:
+                    except TypeError:
+                        # Backward compat: tool doesn't accept 4th arg
                         result, success = executor(function_name, arguments, config)
                 else:
                     result, success = executor(function_name, arguments, config)
@@ -856,9 +764,6 @@ class FunctionManager:
                 success = False
 
         execution_time = time.time() - start_time
-        if result is None:
-            result = "(no output)"
-
         self._log_tool_call(function_name, arguments, result, execution_time, success)
 
         # post_execute hook — plugins can observe results

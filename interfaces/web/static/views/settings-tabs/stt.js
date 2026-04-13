@@ -1,7 +1,5 @@
 // settings-tabs/stt.js - Speech-to-text provider settings
-import { renderProviderTab, attachProviderListeners, mergeRegistryProviders } from '../../shared/provider-selector.js';
-
-let _mergedConfig = null;
+import { renderProviderTab, attachProviderListeners } from '../../shared/provider-selector.js';
 
 const tabConfig = {
     providerKey: 'STT_PROVIDER',
@@ -25,6 +23,11 @@ const tabConfig = {
             label: 'Fireworks Whisper',
             essentialKeys: ['STT_FIREWORKS_API_KEY', 'STT_FIREWORKS_MODEL'],
             advancedKeys: []
+        },
+        sapphire_router: {
+            label: 'Sapphire Router',
+            essentialKeys: ['SAPPHIRE_ROUTER_URL', 'SAPPHIRE_ROUTER_TENANT_ID'],
+            advancedKeys: []
         }
     },
 
@@ -44,20 +47,10 @@ export default {
     description: 'Speech-to-text engine and voice detection',
 
     render(ctx) {
-        const cfg = _mergedConfig || tabConfig;
-        return renderProviderTab(cfg, ctx);
+        return renderProviderTab(tabConfig, ctx);
     },
 
-    async attachListeners(ctx, el) {
-        {
-            _mergedConfig = await mergeRegistryProviders(tabConfig);
-            if (Object.keys(_mergedConfig.providers).length > Object.keys(tabConfig.providers).length) {
-                const body = el.querySelector('.settings-tab-body') || el;
-                body.innerHTML = this.render(ctx);
-                if (ctx.attachAccordionListeners) ctx.attachAccordionListeners(el);
-            }
-        }
-        const cfg = _mergedConfig || tabConfig;
-        attachProviderListeners(cfg, ctx, el);
+    attachListeners(ctx, el) {
+        attachProviderListeners(tabConfig, ctx, el);
     }
 };

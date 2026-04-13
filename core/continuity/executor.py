@@ -38,26 +38,8 @@ class ContinuityExecutor:
         except (json.JSONDecodeError, TypeError):
             return event_data
 
-        if not isinstance(obj, dict):
-            return event_data
-
-        # Email format — structured with subject, sender, body
-        if obj.get("subject") is not None and obj.get("snippet") is not None:
-            from_name = obj.get("from_name", "")
-            from_addr = obj.get("from_address", "")
-            sender = f"{from_name} <{from_addr}>" if from_name else from_addr
-            parts = []
-            if sender:
-                parts.append(f"From: {sender}")
-            parts.append(f"Subject: {obj['subject']}")
-            if obj.get("uid"):
-                parts.append(f"UID: {obj['uid']}")
-            parts.append("")
-            parts.append(obj["snippet"])
-            return "\n".join(parts)
-
         text = obj.get("text") or obj.get("content") or None
-        if not text:
+        if not isinstance(obj, dict) or not text:
             return event_data
 
         # Build clean message from common fields
@@ -80,39 +62,6 @@ class ContinuityExecutor:
             for line in history:
                 parts.append(f"  {line}")
             parts.append("")  # blank line before the trigger message
-
-        # Current date/time for context
-        from datetime import datetime as _dt
-        try:
-            import config as _cfg
-            tz_name = getattr(_cfg, 'USER_TIMEZONE', '')
-            if tz_name:
-                from zoneinfo import ZoneInfo
-                now = _dt.now(ZoneInfo(tz_name))
-            else:
-                now = _dt.now().astimezone()
-        except Exception:
-            now = _dt.now()
-        parts.append(f"Current time: {now.strftime('%Y-%m-%d %H:%M %Z').strip()}")
-
-        # Include chat_id/account for messaging tools (Telegram, Discord)
-        chat_id = obj.get("chat_id")
-        channel_id = obj.get("channel_id")
-        account = obj.get("account")
-        if chat_id:
-            parts.append(f"chat_id: {chat_id}")
-        if channel_id:
-            parts.append(f"channel_id: {channel_id}")
-        if account:
-            parts.append(f"account: {account}")
-
-        # Discord mention hint
-        author_id = obj.get("author_id")
-        if author_id and channel_id:
-            parts.append(f"To @mention this user in Discord, include <@{author_id}> in your message")
-
-        if chat_id or channel_id or account:
-            parts.append("")
 
         # The trigger message itself — emphasized
         if sender:
@@ -162,8 +111,6 @@ class ContinuityExecutor:
                         # Stash channel_id for auto-reply targeting
                         if obj.get("channel_id"):
                             task["_discord_reply_channel_id"] = obj["channel_id"]
-                    elif "telegram" in source and not task.get("telegram_scope"):
-                        task["telegram_scope"] = obj["account"]
                     elif "email" in source and not task.get("email_scope"):
                         task["email_scope"] = obj["account"]
             except (json.JSONDecodeError, TypeError):
@@ -209,8 +156,6 @@ class ContinuityExecutor:
             "email_scope": task.get("email_scope", "default"),
             "bitcoin_scope": task.get("bitcoin_scope", "default"),
             "discord_scope": task.get("discord_scope", "default"),
-            "telegram_scope": task.get("telegram_scope", "default"),
-            "gcal_scope": task.get("gcal_scope", "default"),
         }
 
     def _run_background(self, task: Dict[str, Any], result: Dict[str, Any],
@@ -229,78 +174,65 @@ class ContinuityExecutor:
                 self._restore_voice(original_voice)
                 raise
 
-            try:
-                task_settings = self._extract_task_settings(task)
-                ctx = ExecutionContext(
-                    self.system.llm_chat.function_manager,
-                    self.system.llm_chat.tool_engine,
-                    task_settings
-                )
+        try:
+            task_settings = self._extract_task_settings(task)
+            ctx = ExecutionContext(
+                self.system.llm_chat.function_manager,
+                self.system.llm_chat.tool_engine,
+                task_settings
+            )
 
-                # Set Discord reply channel for auto-reply targeting
-                reply_ch = task.get("_discord_reply_channel_id")
-                if reply_ch:
-                    try:
-                        from plugins.discord.tools.discord_tools import _reply_channel_id
-                        _reply_channel_id.set(reply_ch)
-                    except ImportError:
-                        pass
-
-                tts_enabled = task.get("tts_enabled", True)
-                browser_tts = task.get("browser_tts", False)
-                msg = task.get("initial_message", "Hello.")
-
+            # Set Discord reply channel for auto-reply targeting
+            reply_ch = task.get("_discord_reply_channel_id")
+            if reply_ch:
                 try:
-                    response = ctx.run(msg)
+                    from plugins.discord.tools.discord_tools import _reply_channel_id
+                    _reply_channel_id.set(reply_ch)
+                except ImportError:
+                    pass
 
-                    if response_cb and response:
-                        try: response_cb(response)
-                        except Exception as _e: logger.error(f"[Continuity] Response callback failed: {_e}")
+            tts_enabled = task.get("tts_enabled", True)
+            browser_tts = task.get("browser_tts", False)
+            msg = task.get("initial_message", "Hello.")
 
-                    if response:
-                        if browser_tts:
-                            publish(Events.TTS_SPEAK, {"text": response, "task": task_name})
-                        elif tts_enabled and hasattr(self.system, 'tts') and self.system.tts:
-                            try:
-                                self.system.tts.speak_sync(response)
-                            except Exception as tts_err:
-                                logger.warning(f"[Continuity] TTS failed: {tts_err}")
+            try:
+                response = ctx.run(msg)
 
-                    result["responses"].append({
-                        "iteration": 1,
-                        "input": msg,
-                        "output": response or None
-                    })
-                except Exception as e:
-                    from core.chat.chat import friendly_llm_error
-                    friendly = friendly_llm_error(e)
-                    error_msg = f"Task failed: {friendly or e}"
-                    logger.error(f"[Continuity] {error_msg}", exc_info=True)
-                    result["errors"].append(error_msg)
-                    from core.event_bus import publish, Events
-                    publish(Events.CONTINUITY_TASK_ERROR, {
-                        "task": task.get("name", "Unknown"),
-                        "error": friendly or str(e),
-                    })
+                if response_cb and response:
+                    try: response_cb(response)
+                    except Exception as _e: logger.error(f"[Continuity] Response callback failed: {_e}")
 
-                if progress_cb:
-                    progress_cb(1, 1)
+                if response:
+                    if browser_tts:
+                        publish(Events.TTS_SPEAK, {"text": response, "task": task_name})
+                    elif tts_enabled and hasattr(self.system, 'tts') and self.system.tts:
+                        try:
+                            self.system.tts.speak_sync(response)
+                        except Exception as tts_err:
+                            logger.warning(f"[Continuity] TTS failed: {tts_err}")
 
-                result["success"] = len(result["errors"]) == 0
-
+                result["responses"].append({
+                    "iteration": 1,
+                    "input": msg,
+                    "output": response or None
+                })
             except Exception as e:
-                from core.chat.chat import friendly_llm_error
-                friendly = friendly_llm_error(e)
-                error_msg = f"Background task failed: {friendly or e}"
+                error_msg = f"Task failed: {e}"
                 logger.error(f"[Continuity] {error_msg}", exc_info=True)
                 result["errors"].append(error_msg)
-                from core.event_bus import publish, Events
-                publish(Events.CONTINUITY_TASK_ERROR, {
-                    "task": task.get("name", "Unknown"),
-                    "error": friendly or str(e),
-                })
 
-            finally:
+            if progress_cb:
+                progress_cb(1, 1)
+
+            result["success"] = len(result["errors"]) == 0
+
+        except Exception as e:
+            error_msg = f"Background task failed: {e}"
+            logger.error(f"[Continuity] {error_msg}", exc_info=True)
+            result["errors"].append(error_msg)
+
+        finally:
+            with self._voice_lock:
                 self._restore_voice(original_voice)
 
         result["completed_at"] = datetime.now().isoformat()
@@ -393,16 +325,9 @@ class ContinuityExecutor:
                     "output": response or None
                 })
             except Exception as e:
-                from core.chat.chat import friendly_llm_error
-                friendly = friendly_llm_error(e)
-                error_msg = f"Task failed: {friendly or e}"
+                error_msg = f"Task failed: {e}"
                 logger.error(f"[Continuity] {error_msg}", exc_info=True)
                 result["errors"].append(error_msg)
-                from core.event_bus import publish, Events
-                publish(Events.CONTINUITY_TASK_ERROR, {
-                    "task": task.get("name", "Unknown"),
-                    "error": friendly or str(e),
-                })
 
             if progress_cb:
                 progress_cb(1, 1)
@@ -410,16 +335,9 @@ class ContinuityExecutor:
             result["success"] = len(result["errors"]) == 0
 
         except Exception as e:
-            from core.chat.chat import friendly_llm_error
-            friendly = friendly_llm_error(e)
-            error_msg = f"Persistent chat task failed: {friendly or e}"
+            error_msg = f"Persistent chat task failed: {e}"
             logger.error(f"[Continuity] {error_msg}", exc_info=True)
             result["errors"].append(error_msg)
-            from core.event_bus import publish, Events
-            publish(Events.CONTINUITY_TASK_ERROR, {
-                "task": task.get("name", "Unknown"),
-                "error": friendly or str(e),
-            })
 
         finally:
             with self._voice_lock:
@@ -487,11 +405,6 @@ class ContinuityExecutor:
         except Exception as e:
             logger.error(f"[Continuity] Plugin task '{task.get('name')}' failed: {e}", exc_info=True)
             result["errors"].append(str(e))
-            from core.event_bus import publish, Events
-            publish(Events.CONTINUITY_TASK_ERROR, {
-                "task": task.get("name", "Unknown"),
-                "error": str(e),
-            })
 
         if progress_cb:
             progress_cb(1, 1)
@@ -532,8 +445,6 @@ class ContinuityExecutor:
                 "email_scope": "email_scope",
                 "bitcoin_scope": "bitcoin_scope",
                 "discord_scope": "discord_scope",
-                "telegram_scope": "telegram_scope",
-                "gcal_scope": "gcal_scope",
             }
             for persona_key, task_key in field_map.items():
                 persona_val = ps.get(persona_key)
